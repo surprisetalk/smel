@@ -16,7 +16,7 @@ type model struct {
 	showCursor bool
 }
 
-func initialModel() model {
+func initial() model {
 	return model{
 		showCursor: true,
 	}
@@ -35,17 +35,6 @@ type evalResultMsg struct {
 	err    error
 }
 
-func evalScrapScript(input string) tea.Msg {
-	cmd := exec.Command("python3", "scrapscript.py", "eval", "-")
-	cmd.Stdin = strings.NewReader(input)
-	cmd.Dir = "../scrapscript.py"
-	output, err := cmd.CombinedOutput()
-	return evalResultMsg{
-		output: strings.TrimSpace(string(output)),
-		err:    err,
-	}
-}
-
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -57,7 +46,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, func() tea.Msg {
-				return evalScrapScript(m.input)
+				cmd := exec.Command("python3", "scrapscript.py", "eval", "-")
+				cmd.Stdin = strings.NewReader(m.input)
+				cmd.Dir = "../scrapscript.py"
+				output, err := cmd.CombinedOutput()
+				return evalResultMsg{
+					output: strings.TrimSpace(string(output)),
+					err:    err,
+				}
 			}
 		case tea.KeyBackspace:
 			if len(m.input) > 0 {
@@ -85,22 +81,20 @@ func (m model) View() string {
 	if !m.showCursor {
 		cursor = " "
 	}
-
-	s := "Scrapscript Interpreter\n\n"
+	s := ""
 	s += fmt.Sprintf("> %s%s\n\n", m.input, cursor)
-
 	if m.err != nil {
 		s += fmt.Sprintf("Error: %v\n", m.err)
 	} else if m.output != "" {
 		s += fmt.Sprintf("Result: %s\n", m.output)
+	} else {
+		s += "\n"
 	}
-
-	s += "\nCtrl+C to quit\n"
 	return s
 }
 
 func main() {
-	p := tea.NewProgram(initialModel())
+	p := tea.NewProgram(initial())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error running program: %v\n", err)
 	}
