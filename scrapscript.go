@@ -9,6 +9,8 @@ package smel
 
 import (
 	"fmt"
+	"math"
+	"reflect"
 	"strconv"
 	"strings"
 	"unicode"
@@ -277,857 +279,947 @@ func Lex(input string) ([]Token, error) {
 
 //// PARSE
 
-/*
-
-def parse_assign(tokens: Token[], p: float = 0) -> "Assign":
-    assign = parse_binary(tokens, p)
-    if isinstance(assign, Spread):
-        return Assign(Var("..."), assign)
-    if not isinstance(assign, Assign):
-        raise ParseError("failed to parse variable assignment in record constructor")
-    return assign
-
-
-def gensym() -> str:
-    gensym.counter += 1  # type: ignore
-    return f"$v{gensym.counter}"  # type: ignore
-
-
-def gensym_reset() -> None:
-    gensym.counter = -1  # type: ignore
-
-
-gensym_reset()
-
-
-def parse_unary(tokens: Token[], p: float) -> "Object":
-    token = next(tokens)
-    l: Object
-    if isinstance(token, IntLit):
-        return Int(token.value)
-    elif isinstance(token, FloatLit):
-        return Float(token.value)
-    elif isinstance(token, Name):
-        # TODO: Handle kebab case vars
-        return Var(token.value)
-    elif isinstance(token, Hash):
-        if isinstance(variant := next(tokens), Name):
-            # It needs to be higher than the precedence of the -> operator so that
-            # we can match variants in MatchFunction
-            # It needs to be higher than the precedence of the && operator so that
-            # we can use #true() and #false() in boolean expressions
-            # It needs to be higher than the precedence of juxtaposition so that
-            # f #true() #false() is parsed as f(TRUE)(FALSE)
-            return Variant(variant.value, parse_binary(tokens, PS[""].pr + 1))
-        else:
-            raise UnexpectedTokenError(variant)
-    elif isinstance(token, BytesLit):
-        base = token.base
-        if base == 85:
-            l = Bytes(base64.b85decode(token.value))
-        elif base == 64:
-            l = Bytes(base64.b64decode(token.value))
-        elif base == 32:
-            l = Bytes(base64.b32decode(token.value))
-        elif base == 16:
-            l = Bytes(base64.b16decode(token.value))
-        else:
-            raise ParseError(f"unexpected base {base!r} in {token!r}")
-        return l
-    elif isinstance(token, StringLit):
-        return String(token.value)
-    elif token == Operator("..."):
-        try:
-            if isinstance(tokens.peek(), Name):
-                return Spread(next(tokens).value)
-            else:
-                return Spread()
-        except StopIteration:
-            return Spread()
-    elif token == Operator("|"):
-        expr = parse_binary(tokens, PS["|"].pr)  # TODO: make this work for larger arities
-        if not isinstance(expr, Function):
-            raise ParseError(f"expected function in match expression {expr!r}")
-        cases = [MatchCase(expr.arg, expr.body)]
-        while True:
-            try:
-                if tokens.peek() != Operator("|"):
-                    break
-            except StopIteration:
-                break
-            next(tokens)
-            expr = parse_binary(tokens, PS["|"].pr)  # TODO: make this work for larger arities
-            if not isinstance(expr, Function):
-                raise ParseError(f"expected function in match expression {expr!r}")
-            cases.append(MatchCase(expr.arg, expr.body))
-        return MatchFunction(cases)
-    elif isinstance(token, LeftParen):
-        if isinstance(tokens.peek(), RightParen):
-            l = Hole()
-        else:
-            l = parse(tokens)
-        next(tokens)
-        return l
-    elif isinstance(token, LeftBracket):
-        l = List([])
-        token = tokens.peek()
-        if isinstance(token, RightBracket):
-            next(tokens)
-        else:
-            l.items.append(parse_binary(tokens, 2))
-            while not isinstance(next(tokens), RightBracket):
-                if isinstance(l.items[-1], Spread):
-                    raise ParseError("spread must come at end of list match")
-                # TODO: Implement .. operator
-                l.items.append(parse_binary(tokens, 2))
-        return l
-    elif isinstance(token, LeftBrace):
-        l = Record({})
-        token = tokens.peek()
-        if isinstance(token, RightBrace):
-            next(tokens)
-        else:
-            assign = parse_assign(tokens, 2)
-            l.data[assign.name.name] = assign.value
-            while not isinstance(next(tokens), RightBrace):
-                if isinstance(assign.value, Spread):
-                    raise ParseError("spread must come at end of record match")
-                # TODO: Implement .. operator
-                assign = parse_assign(tokens, 2)
-                l.data[assign.name.name] = assign.value
-        return l
-    elif token == Operator("-"):
-        # Unary minus
-        # Precedence was chosen to be higher than binary ops so that -a op
-        # b is (-a) op b and not -(a op b).
-        # Precedence was chosen to be higher than function application so that
-        # -a b is (-a) b and not -(a b).
-        r = parse_binary(tokens, HIGHEST_PREC + 1)
-        if isinstance(r, Int):
-            assert r.value >= 0, "Tokens should never have negative values"
-            return Int(-r.value)
-        if isinstance(r, Float):
-            assert r.value >= 0, "Tokens should never have negative values"
-            return Float(-r.value)
-        return Binop(BinopKind.SUB, Int(0), r)
-    else:
-        raise UnexpectedTokenError(token)
-
-
-def parse_binary(tokens: Token[], p: float) -> "Object":
-    l: Object = parse_unary(tokens, p)
-    while True:
-        op: Token
-        try:
-            op = tokens.peek()
-        except StopIteration:
-            break
-        if isinstance(op, (RightParen, RightBracket, RightBrace)):
-            break
-        if not isinstance(op, Operator):
-            prec = PS[""]
-            pl, pr = prec.pl, prec.pr
-            if pl < p:
-                break
-            l = Apply(l, parse_binary(tokens, pr))
-            continue
-        prec = PS[op.value]
-        pl, pr = prec.pl, prec.pr
-        if pl < p:
-            break
-        next(tokens)
-        if op == Operator("="):
-            if not isinstance(l, Var):
-                raise ParseError(f"expected variable in assignment {l!r}")
-            l = Assign(l, parse_binary(tokens, pr))
-        elif op == Operator("->"):
-            l = Function(l, parse_binary(tokens, pr))
-        elif op == Operator("|>"):
-            l = Apply(parse_binary(tokens, pr), l)
-        elif op == Operator("<|"):
-            l = Apply(l, parse_binary(tokens, pr))
-        elif op == Operator(">>"):
-            r = parse_binary(tokens, pr)
-            varname = gensym()
-            l = Function(Var(varname), Apply(r, Apply(l, Var(varname))))
-        elif op == Operator("<<"):
-            r = parse_binary(tokens, pr)
-            varname = gensym()
-            l = Function(Var(varname), Apply(l, Apply(r, Var(varname))))
-        elif op == Operator("."):
-            l = Where(l, parse_binary(tokens, pr))
-        elif op == Operator("?"):
-            l = Assert(l, parse_binary(tokens, pr))
-        elif op == Operator("@"):
-            # TODO: revisit whether to use @ or . for field access
-            l = Access(l, parse_binary(tokens, pr))
-        else:
-            assert isinstance(op, Operator)
-            l = Binop(BinopKind.from_str(op.value), l, parse_binary(tokens, pr))
-    return l
-
-
-def parse(tokens: Token[]) -> "Object":
-    try:
-        return parse_binary(tokens, 0)
-    except StopIteration:
-        raise UnexpectedEOFError("unexpected end of input")
-
-*/
-
-//// ENCODE
-
-/*
-tags = [
-    TYPE_SHORT := b"i",  # fits in 64 bits
-    TYPE_LONG := b"l",  # bignum
-    TYPE_FLOAT := b"d",
-    TYPE_STRING := b"s",
-    TYPE_REF := b"r",
-    TYPE_LIST := b"[",
-    TYPE_RECORD := b"{",
-    TYPE_VARIANT := b"#",
-    TYPE_VAR := b"v",
-    TYPE_FUNCTION := b"f",
-    TYPE_MATCH_FUNCTION := b"m",
-    TYPE_CLOSURE := b"c",
-    TYPE_BYTES := b"b",
-    TYPE_HOLE := b"(",
-    TYPE_ASSIGN := b"=",
-    TYPE_BINOP := b"+",
-    TYPE_APPLY := b" ",
-    TYPE_WHERE := b".",
-    TYPE_ACCESS := b"@",
-    TYPE_SPREAD := b"S",
-    TYPE_NAMED_SPREAD := b"R",
-]
-FLAG_REF = 0x80
-
-
-DIGIT_MASK = (1 << 64) - 1
-
-def ref(tag: bytes) -> bytes:
-    return (tag[0] | FLAG_REF).to_bytes(1, "little")
-
-tags = tags + [ref(v) for v in tags]
-assert len(tags) == len(set(tags)), "Duplicate tags"
-assert all(len(v) == 1 for v in tags), "Tags must be 1 byte"
-assert all(isinstance(v, bytes) for v in tags)
-
-
-def zigzag_encode(val: int) -> int:
-    if val < 0:
-        return -2 * val - 1
-    return 2 * val
-
-
-def zigzag_decode(val: int) -> int:
-    if val & 1 == 1:
-        return -val // 2
-    return val // 2
-
-
-@dataclass
-class Serializer:
-    refs: typing.List[Object] = dataclasses.field(default_factory=list)
-    output: bytearray = dataclasses.field(default_factory=bytearray)
-
-    def ref(self, obj: Object) -> Optional[int]:
-        for idx, ref in enumerate(self.refs):
-            if ref is obj:
-                return idx
-        return None
-
-    def add_ref(self, ty: bytes, obj: Object) -> int:
-        assert len(ty) == 1
-        assert self.ref(obj) is None
-        self.emit(ref(ty))
-        result = len(self.refs)
-        self.refs.append(obj)
-        return result
-
-    def emit(self, obj: bytes) -> None:
-        self.output.extend(obj)
-
-    def _fits_in_nbits(self, obj: int, nbits: int) -> bool:
-        return -(1 << (nbits - 1)) <= obj < (1 << (nbits - 1))
-
-    def _short(self, number: int) -> bytes:
-        # From Peter Ruibal, https://github.com/fmoo/python-varint
-        number = zigzag_encode(number)
-        buf = bytearray()
-        while True:
-            towrite = number & 0x7F
-            number >>= 7
-            if number:
-                buf.append(towrite | 0x80)
-            else:
-                buf.append(towrite)
-                break
-        return bytes(buf)
-
-    def _long(self, number: int) -> bytes:
-        digits = []
-        number = zigzag_encode(number)
-        while number:
-            digits.append(number & DIGIT_MASK)
-            number >>= BITS_PER_DIGIT
-        buf = bytearray(self._short(len(digits)))
-        for digit in digits:
-            buf.extend(digit.to_bytes(BYTES_PER_DIGIT, "little"))
-        return bytes(buf)
-
-    def _string(self, obj: str) -> bytes:
-        encoded = obj.encode("utf-8")
-        return self._short(len(encoded)) + encoded
-
-    def serialize(self, obj: Object) -> None:
-        assert isinstance(obj, Object), type(obj)
-        if (ref := self.ref(obj)) is not None:
-            return self.emit(TYPE_REF + self._short(ref))
-        if isinstance(obj, Int):
-            if self._fits_in_nbits(obj.value, 64):
-                self.emit(TYPE_SHORT)
-                self.emit(self._short(obj.value))
-                return
-            self.emit(TYPE_LONG)
-            self.emit(self._long(obj.value))
-            return
-        if isinstance(obj, String):
-            return self.emit(TYPE_STRING + self._string(obj.value))
-        if isinstance(obj, List):
-            self.add_ref(TYPE_LIST, obj)
-            self.emit(self._short(len(obj.items)))
-            for item in obj.items:
-                self.serialize(item)
-            return
-        if isinstance(obj, Variant):
-            # TODO(max): Determine if this should be a ref
-            self.emit(TYPE_VARIANT)
-            # TODO(max): String pool (via refs) for strings longer than some length?
-            self.emit(self._string(obj.tag))
-            return self.serialize(obj.value)
-        if isinstance(obj, Record):
-            # TODO(max): Determine if this should be a ref
-            self.emit(TYPE_RECORD)
-            self.emit(self._short(len(obj.data)))
-            for key, value in obj.data.items():
-                self.emit(self._string(key))
-                self.serialize(value)
-            return
-        if isinstance(obj, Var):
-            return self.emit(TYPE_VAR + self._string(obj.name))
-        if isinstance(obj, Function):
-            self.emit(TYPE_FUNCTION)
-            self.serialize(obj.arg)
-            return self.serialize(obj.body)
-        if isinstance(obj, MatchFunction):
-            self.emit(TYPE_MATCH_FUNCTION)
-            self.emit(self._short(len(obj.cases)))
-            for case in obj.cases:
-                self.serialize(case.pattern)
-                self.serialize(case.body)
-            return
-        if isinstance(obj, Closure):
-            self.add_ref(TYPE_CLOSURE, obj)
-            self.serialize(obj.func)
-            self.emit(self._short(len(obj.env)))
-            for key, value in obj.env.items():
-                self.emit(self._string(key))
-                self.serialize(value)
-            return
-        if isinstance(obj, Bytes):
-            self.emit(TYPE_BYTES)
-            self.emit(self._short(len(obj.value)))
-            self.emit(obj.value)
-            return
-        if isinstance(obj, Float):
-            self.emit(TYPE_FLOAT)
-            self.emit(struct.pack("<d", obj.value))
-            return
-        if isinstance(obj, Hole):
-            self.emit(TYPE_HOLE)
-            return
-        if isinstance(obj, Assign):
-            self.emit(TYPE_ASSIGN)
-            self.serialize(obj.name)
-            self.serialize(obj.value)
-            return
-        if isinstance(obj, Binop):
-            self.emit(TYPE_BINOP)
-            self.emit(self._string(BinopKind.to_str(obj.op)))
-            self.serialize(obj.left)
-            self.serialize(obj.right)
-            return
-        if isinstance(obj, Apply):
-            self.emit(TYPE_APPLY)
-            self.serialize(obj.func)
-            self.serialize(obj.arg)
-            return
-        if isinstance(obj, Where):
-            self.emit(TYPE_WHERE)
-            self.serialize(obj.body)
-            self.serialize(obj.binding)
-            return
-        if isinstance(obj, Access):
-            self.emit(TYPE_ACCESS)
-            self.serialize(obj.obj)
-            self.serialize(obj.at)
-            return
-        if isinstance(obj, Spread):
-            if obj.name is not None:
-                self.emit(TYPE_NAMED_SPREAD)
-                self.emit(self._string(obj.name))
-                return
-            self.emit(TYPE_SPREAD)
-            return
-        raise NotImplementedError(type(obj))
-
-
-*/
-
-//// DECODE
-
-/*
-
-@dataclass
-class Deserializer:
-    flat: Union[bytes, memoryview]
-    idx: int = 0
-    refs: typing.List[Object] = dataclasses.field(default_factory=list)
-
-    def __post_init__(self) -> None:
-        if isinstance(self.flat, bytes):
-            self.flat = memoryview(self.flat)
-
-    def read(self, size: int) -> memoryview:
-        result = memoryview(self.flat[self.idx : self.idx + size])
-        self.idx += size
-        return result
-
-    def read_tag(self) -> Tuple[bytes, bool]:
-        tag = self.read(1)[0]
-        is_ref = bool(tag & FLAG_REF)
-        return (tag & ~FLAG_REF).to_bytes(1, "little"), is_ref
-
-    def _string(self) -> str:
-        length = self._short()
-        encoded = self.read(length)
-        return str(encoded, "utf-8")
-
-    def _short(self) -> int:
-        # From Peter Ruibal, https://github.com/fmoo/python-varint
-        shift = 0
-        result = 0
-        while True:
-            i = self.read(1)[0]
-            result |= (i & 0x7F) << shift
-            shift += 7
-            if not (i & 0x80):
-                break
-        return zigzag_decode(result)
-
-    def _long(self) -> int:
-        num_digits = self._short()
-        digits = []
-        for _ in range(num_digits):
-            digit = int.from_bytes(self.read(BYTES_PER_DIGIT), "little")
-            digits.append(digit)
-        result = 0
-        for digit in reversed(digits):
-            result <<= BITS_PER_DIGIT
-            result |= digit
-        return zigzag_decode(result)
-
-    def parse(self) -> Object:
-        ty, is_ref = self.read_tag()
-        if ty == TYPE_REF:
-            idx = self._short()
-            return self.refs[idx]
-        if ty == TYPE_SHORT:
-            assert not is_ref
-            return Int(self._short())
-        if ty == TYPE_LONG:
-            assert not is_ref
-            return Int(self._long())
-        if ty == TYPE_STRING:
-            assert not is_ref
-            return String(self._string())
-        if ty == TYPE_LIST:
-            length = self._short()
-            result_list = List([])
-            assert is_ref
-            self.refs.append(result_list)
-            for i in range(length):
-                result_list.items.append(self.parse())
-            return result_list
-        if ty == TYPE_RECORD:
-            assert not is_ref
-            length = self._short()
-            result_rec = Record({})
-            for i in range(length):
-                key = self._string()
-                value = self.parse()
-                result_rec.data[key] = value
-            return result_rec
-        if ty == TYPE_VARIANT:
-            assert not is_ref
-            tag = self._string()
-            value = self.parse()
-            return Variant(tag, value)
-        if ty == TYPE_VAR:
-            assert not is_ref
-            return Var(self._string())
-        if ty == TYPE_FUNCTION:
-            assert not is_ref
-            arg = self.parse()
-            body = self.parse()
-            return Function(arg, body)
-        if ty == TYPE_MATCH_FUNCTION:
-            assert not is_ref
-            length = self._short()
-            result_matchfun = MatchFunction([])
-            for i in range(length):
-                pattern = self.parse()
-                body = self.parse()
-                result_matchfun.cases.append(MatchCase(pattern, body))
-            return result_matchfun
-        if ty == TYPE_CLOSURE:
-            func = self.parse()
-            length = self._short()
-            assert isinstance(func, (Function, MatchFunction))
-            result_closure = Closure({}, func)
-            assert is_ref
-            self.refs.append(result_closure)
-            for i in range(length):
-                key = self._string()
-                value = self.parse()
-                assert isinstance(result_closure.env, dict)  # For mypy
-                result_closure.env[key] = value
-            return result_closure
-        if ty == TYPE_BYTES:
-            assert not is_ref
-            length = self._short()
-            return Bytes(self.read(length))
-        if ty == TYPE_FLOAT:
-            assert not is_ref
-            return Float(struct.unpack("<d", self.read(8))[0])
-        if ty == TYPE_HOLE:
-            assert not is_ref
-            return Hole()
-        if ty == TYPE_ASSIGN:
-            assert not is_ref
-            name = self.parse()
-            value = self.parse()
-            assert isinstance(name, Var)
-            return Assign(name, value)
-        if ty == TYPE_BINOP:
-            assert not is_ref
-            op = BinopKind.from_str(self._string())
-            left = self.parse()
-            right = self.parse()
-            return Binop(op, left, right)
-        if ty == TYPE_APPLY:
-            assert not is_ref
-            func = self.parse()
-            arg = self.parse()
-            return Apply(func, arg)
-        if ty == TYPE_WHERE:
-            assert not is_ref
-            body = self.parse()
-            binding = self.parse()
-            return Where(body, binding)
-        if ty == TYPE_ACCESS:
-            assert not is_ref
-            obj = self.parse()
-            at = self.parse()
-            return Access(obj, at)
-        if ty == TYPE_SPREAD:
-            return Spread()
-        if ty == TYPE_NAMED_SPREAD:
-            return Spread(self._string())
-        raise NotImplementedError(bytes(ty))
-
-
-*/
-
-//// DECODE
-
-/*
-
-def unpack_number(obj: Object) -> Union[int, float]:
-    if not isinstance(obj, (Int, Float)):
-        raise TypeError(f"expected Int or Float, got {type(obj).__name__}")
-    return obj.value
-
-
-def eval_number(env: Env, exp: Object) -> Union[int, float]:
-    result = eval_exp(env, exp)
-    return unpack_number(result)
-
-
-def eval_str(env: Env, exp: Object) -> str:
-    result = eval_exp(env, exp)
-    if not isinstance(result, String):
-        raise TypeError(f"expected String, got {type(result).__name__}")
-    return result.value
-
-
-def eval_bool(env: Env, exp: Object) -> bool:
-    result = eval_exp(env, exp)
-    if not isinstance(result, Variant):
-        raise TypeError(f"expected #true or #false, got {type(result).__name__}")
-    if result.tag not in ("true", "false"):
-        raise TypeError(f"expected #true or #false, got {type(result).__name__}")
-    return result.tag == "true"
-
-
-def eval_list(env: Env, exp: Object) -> typing.List[Object]:
-    result = eval_exp(env, exp)
-    if not isinstance(result, List):
-        raise TypeError(f"expected List, got {type(result).__name__}")
-    return result.items
-
-
-def make_bool(x: bool) -> Object:
-    return TRUE if x else FALSE
-
-
-def wrap_inferred_number_type(x: Union[int, float]) -> Object:
-    # TODO: Since this is intended to be a reference implementation
-    # we should avoid relying heavily on Python's implementation of
-    # arithmetic operations, type inference, and multiple dispatch.
-    # Update this to make the interpreter more language agnostic.
-    if isinstance(x, int):
-        return Int(x)
-    return Float(x)
-
-class MatchError(Exception):
-    pass
-
-def match(obj: Object, pattern: Object) -> Optional[Env]:
-    if isinstance(pattern, Hole):
-        return {} if isinstance(obj, Hole) else None
-    if isinstance(pattern, Int):
-        return {} if isinstance(obj, Int) and obj.value == pattern.value else None
-    if isinstance(pattern, Float):
-        raise MatchError("pattern matching is not supported for Floats")
-    if isinstance(pattern, String):
-        return {} if isinstance(obj, String) and obj.value == pattern.value else None
-    if isinstance(pattern, Var):
-        return {pattern.name: obj}
-    if isinstance(pattern, Variant):
-        if not isinstance(obj, Variant):
-            return None
-        if obj.tag != pattern.tag:
-            return None
-        return match(obj.value, pattern.value)
-    if isinstance(pattern, Record):
-        if not isinstance(obj, Record):
-            return None
-        result: Env = {}
-        use_spread = False
-        seen_keys: set[str] = set()
-        for key, pattern_item in pattern.data.items():
-            if isinstance(pattern_item, Spread):
-                use_spread = True
-                if pattern_item.name is not None:
-                    assert isinstance(result, dict)  # for .update()
-                    rest_keys = set(obj.data.keys()) - seen_keys
-                    result.update({pattern_item.name: Record({key: obj.data[key] for key in rest_keys})})
-                break
-            seen_keys.add(key)
-            obj_item = obj.data.get(key)
-            if obj_item is None:
-                return None
-            part = match(obj_item, pattern_item)
-            if part is None:
-                return None
-            assert isinstance(result, dict)  # for .update()
-            result.update(part)
-        if not use_spread and len(pattern.data) != len(obj.data):
-            return None
-        return result
-    if isinstance(pattern, List):
-        if not isinstance(obj, List):
-            return None
-        result: Env = {}  # type: ignore
-        use_spread = False
-        for i, pattern_item in enumerate(pattern.items):
-            if isinstance(pattern_item, Spread):
-                use_spread = True
-                if pattern_item.name is not None:
-                    assert isinstance(result, dict)  # for .update()
-                    result.update({pattern_item.name: List(obj.items[i:])})
-                break
-            if i >= len(obj.items):
-                return None
-            obj_item = obj.items[i]
-            part = match(obj_item, pattern_item)
-            if part is None:
-                return None
-            assert isinstance(result, dict)  # for .update()
-            result.update(part)
-        if not use_spread and len(pattern.items) != len(obj.items):
-            return None
-        return result
-    raise NotImplementedError(f"match not implemented for {type(pattern).__name__}")
-
-
-def free_in(exp: Object) -> Set[str]:
-    if isinstance(exp, (Int, Float, String, Bytes, Hole, NativeFunction)):
-        return set()
-    if isinstance(exp, Variant):
-        return free_in(exp.value)
-    if isinstance(exp, Var):
-        return {exp.name}
-    if isinstance(exp, Spread):
-        if exp.name is not None:
-            return {exp.name}
-        return set()
-    if isinstance(exp, Binop):
-        return free_in(exp.left) | free_in(exp.right)
-    if isinstance(exp, List):
-        if not exp.items:
-            return set()
-        return set.union(*(free_in(item) for item in exp.items))
-    if isinstance(exp, Record):
-        if not exp.data:
-            return set()
-        return set.union(*(free_in(value) for key, value in exp.data.items()))
-    if isinstance(exp, Function):
-        assert isinstance(exp.arg, Var)
-        return free_in(exp.body) - {exp.arg.name}
-    if isinstance(exp, MatchFunction):
-        if not exp.cases:
-            return set()
-        return set.union(*(free_in(case) for case in exp.cases))
-    if isinstance(exp, MatchCase):
-        return free_in(exp.body) - free_in(exp.pattern)
-    if isinstance(exp, Apply):
-        return free_in(exp.func) | free_in(exp.arg)
-    if isinstance(exp, Access):
-        # For records, y is not free in x@y; it is a field name.
-        # For lists, y *is* free in x@y; it is an index expression (could be a
-        # var).
-        # For now, we'll assume it might be an expression and mark it as a
-        # (possibly extra) freevar.
-        return free_in(exp.obj) | free_in(exp.at)
-    if isinstance(exp, Where):
-        assert isinstance(exp.binding, Assign)
-        return (free_in(exp.body) - {exp.binding.name.name}) | free_in(exp.binding)
-    if isinstance(exp, Assign):
-        return free_in(exp.value)
-    if isinstance(exp, Closure):
-        # TODO(max): Should this remove the set of keys in the closure env?
-        return free_in(exp.func)
-    raise NotImplementedError(("free_in", type(exp)))
-
-
-def improve_closure(closure: Closure) -> Closure:
-    freevars = free_in(closure.func)
-    env = {boundvar: value for boundvar, value in closure.env.items() if boundvar in freevars}
-    return Closure(env, closure.func)
-
-
-def eval_exp(env: Env, exp: Object) -> Object:
-    logger.debug(exp)
-    if isinstance(exp, (Int, Float, String, Bytes, Hole, Closure, NativeFunction)):
-        return exp
-    if isinstance(exp, Variant):
-        return Variant(exp.tag, eval_exp(env, exp.value))
-    if isinstance(exp, Var):
-        value = env.get(exp.name)
-        if value is None:
-            raise NameError(f"name '{exp.name}' is not defined")
-        return value
-    if isinstance(exp, Binop):
-        handler = BINOP_HANDLERS.get(exp.op)
-        if handler is None:
-            raise NotImplementedError(f"no handler for {exp.op}")
-        return handler(env, exp.left, exp.right)
-    if isinstance(exp, List):
-        return List([eval_exp(env, item) for item in exp.items])
-    if isinstance(exp, Record):
-        return Record({k: eval_exp(env, exp.data[k]) for k in exp.data})
-    if isinstance(exp, Assign):
-        # TODO(max): Rework this. There's something about matching that we need
-        # to figure out and implement.
-        assert isinstance(exp.name, Var)
-        value = eval_exp(env, exp.value)
-        if isinstance(value, Closure):
-            # We want functions to be able to call themselves without using the
-            # Y combinator or similar, so we bind functions (and only
-            # functions) using a letrec-like strategy. We augment their
-            # captured environment with a binding to themselves.
-            assert isinstance(value.env, dict)
-            value.env[exp.name.name] = value
-            # We still improve_closure here even though we also did it on
-            # Closure creation because the Closure might not need a binding for
-            # itself (it might not be recursive).
-            value = improve_closure(value)
-        return EnvObject({**env, exp.name.name: value})
-    if isinstance(exp, Where):
-        assert isinstance(exp.binding, Assign)
-        res_env = eval_exp(env, exp.binding)
-        assert isinstance(res_env, EnvObject)
-        new_env = {**env, **res_env.env}
-        return eval_exp(new_env, exp.body)
-    if isinstance(exp, Assert):
-        cond = eval_exp(env, exp.cond)
-        if cond != TRUE:
-            raise AssertionError(f"condition {exp.cond} failed")
-        return eval_exp(env, exp.value)
-    if isinstance(exp, Function):
-        if not isinstance(exp.arg, Var):
-            raise RuntimeError(f"expected variable in function definition {exp.arg}")
-        value = Closure(env, exp)
-        value = improve_closure(value)
-        return value
-    if isinstance(exp, MatchFunction):
-        value = Closure(env, exp)
-        value = improve_closure(value)
-        return value
-    if isinstance(exp, Apply):
-        if isinstance(exp.func, Var) and exp.func.name == "$$quote":
-            return exp.arg
-        callee = eval_exp(env, exp.func)
-        arg = eval_exp(env, exp.arg)
-        if isinstance(callee, NativeFunction):
-            return callee.func(arg)
-        if not isinstance(callee, Closure):
-            raise TypeError(f"attempted to apply a non-closure of type {type(callee).__name__}")
-        if isinstance(callee.func, Function):
-            assert isinstance(callee.func.arg, Var)
-            new_env = {**callee.env, callee.func.arg.name: arg}
-            return eval_exp(new_env, callee.func.body)
-        elif isinstance(callee.func, MatchFunction):
-            for case in callee.func.cases:
-                m = match(arg, case.pattern)
-                if m is None:
-                    continue
-                return eval_exp({**callee.env, **m}, case.body)
-            raise MatchError("no matching cases")
-        else:
-            raise TypeError(f"attempted to apply a non-function of type {type(callee.func).__name__}")
-    if isinstance(exp, Access):
-        obj = eval_exp(env, exp.obj)
-        if isinstance(obj, Record):
-            if not isinstance(exp.at, Var):
-                raise TypeError(f"cannot access record field using {type(exp.at).__name__}, expected a field name")
-            if exp.at.name not in obj.data:
-                raise NameError(f"no assignment to {exp.at.name} found in record")
-            return obj.data[exp.at.name]
-        elif isinstance(obj, List):
-            access_at = eval_exp(env, exp.at)
-            if not isinstance(access_at, Int):
-                raise TypeError(f"cannot index into list using type {type(access_at).__name__}, expected integer")
-            if access_at.value < 0 or access_at.value >= len(obj.items):
-                raise ValueError(f"index {access_at.value} out of bounds for list")
-            return obj.items[access_at.value]
-        raise TypeError(f"attempted to access from type {type(obj).__name__}")
-    elif isinstance(exp, Spread):
-        raise RuntimeError("cannot evaluate a spread")
-    raise NotImplementedError(f"eval_exp not implemented for {exp}")
-
-*/
+// AST node types
+type NodeType int
+
+const (
+	NodeInt NodeType = iota
+	NodeFloat
+	NodeString
+	NodeBytes
+	NodeVar
+	NodeVariant
+	NodeBinOp
+	NodeFunction
+	NodeApply
+	NodeList
+	NodeRecord
+	NodeAssign
+	NodeWhere
+	NodeAccess
+	NodeAssert
+	NodeSpread
+	NodeHole
+	NodeMatchFunction
+)
+
+// Object represents any AST node
+type Object struct {
+	// TODO: Consider only using BytesVal instead of IntVal, FloatVal, etc.
+	Type     NodeType
+	IntVal   int64
+	FloatVal float64
+	StrVal   string
+	BytesVal []byte
+	Name     string
+	Op       string // For binary operators
+	Left     *Object
+	Right    *Object
+	Params   []*Object
+	Fields   map[string]*Object
+}
+
+// Operator precedence and associativity
+type precedence struct {
+	pl float64 // Left precedence
+	pr float64 // Right precedence
+}
+
+var operatorPrecedence = map[string]precedence{
+	"":   {0, 1},   // Default/juxtaposition
+	"=":  {2, 1},   // Assignment
+	"->": {3, 2},   // Function arrow
+	"|>": {4, 5},   // Forward pipe
+	"<|": {5, 4},   // Backward pipe
+	">>": {6, 7},   // Forward compose
+	"<<": {7, 6},   // Backward compose
+	".":  {8, 9},   // Where
+	"?":  {10, 11}, // Assert
+	"@":  {12, 13}, // Access
+	"+":  {20, 21}, // Add
+	"-":  {20, 21}, // Subtract
+	"*":  {30, 31}, // Multiply
+	"/":  {30, 31}, // Divide
+}
+
+const highestPrec = 100.0
+
+var symCounter = -1
+
+func gensym() string {
+	symCounter++
+	return fmt.Sprintf("$v%d", symCounter)
+}
+
+func resetGensym() {
+	symCounter = -1
+}
+
+type parser struct {
+	tokens []Token
+	pos    int
+}
+
+func newParser(tokens []Token) *parser {
+	return &parser{tokens: tokens}
+}
+
+func (p *parser) peek() *Token {
+	if p.pos >= len(p.tokens) {
+		return nil
+	}
+	return &p.tokens[p.pos]
+}
+
+func (p *parser) next() *Token {
+	if p.pos >= len(p.tokens) {
+		return nil
+	}
+	token := &p.tokens[p.pos]
+	p.pos++
+	return token
+}
+
+func (p *parser) parseUnary(prec float64) (*Object, error) {
+	token := p.next()
+	if token == nil {
+		return nil, fmt.Errorf("unexpected end of input")
+	}
+
+	switch token.Type {
+	case TokenIntLit:
+		return &Object{Type: NodeInt, IntVal: token.Value.(int64)}, nil
+
+	case TokenFloatLit:
+		return &Object{Type: NodeFloat, FloatVal: token.Value.(float64)}, nil
+
+	case TokenName:
+		return &Object{Type: NodeVar, Name: token.Value.(string)}, nil
+
+	case TokenStringLit:
+		return &Object{Type: NodeString, StrVal: token.Value.(string)}, nil
+
+	case TokenHash:
+		variant := p.next()
+		if variant == nil {
+			return nil, fmt.Errorf("unexpected end")
+		}
+		if variant.Type != TokenName {
+			return nil, fmt.Errorf("expected name after #")
+		}
+		right, err := p.parseBinary(operatorPrecedence[""].pr + 1)
+		if err != nil {
+			return nil, err
+		}
+		return &Object{
+			Type:  NodeVariant,
+			Name:  variant.Value.(string),
+			Right: right,
+		}, nil
+
+	case TokenLeftParen:
+		if next := p.peek(); next != nil && next.Type == TokenRightParen {
+			p.next() // consume )
+			return &Object{Type: NodeHole}, nil
+		}
+		expr, err := p.parseBinary(0)
+		if err != nil {
+			return nil, err
+		}
+		if next := p.next(); next == nil || next.Type != TokenRightParen {
+			return nil, fmt.Errorf("expected )")
+		}
+		return expr, nil
+
+	case TokenLeftBracket:
+		list := &Object{Type: NodeList, Params: make([]*Object, 0)}
+		if next := p.peek(); next != nil && next.Type == TokenRightBracket {
+			p.next() // consume ]
+			return list, nil
+		}
+
+		// Parse first item
+		item, err := p.parseBinary(2)
+		if err != nil {
+			return nil, err
+		}
+		list.Params = append(list.Params, item)
+
+		// Parse remaining items
+		for {
+			next := p.next()
+			if next == nil {
+				return nil, fmt.Errorf("expected , or ]")
+			}
+			if next.Type == TokenRightBracket {
+				break
+			}
+			if next.Type != TokenOperator || next.Value != "," {
+				return nil, fmt.Errorf("expected , between list items")
+			}
+			item, err := p.parseBinary(2)
+			if err != nil {
+				return nil, err
+			}
+			list.Params = append(list.Params, item)
+		}
+		return list, nil
+
+	case TokenLeftBrace:
+		record := &Object{Type: NodeRecord, Fields: make(map[string]*Object)}
+		if next := p.peek(); next != nil && next.Type == TokenRightBrace {
+			p.next() // consume }
+			return record, nil
+		}
+
+		// Parse first field
+		field, err := p.parseAssign(2)
+		if err != nil {
+			return nil, err
+		}
+		record.Fields[field.Name] = field.Right
+
+		// Parse remaining fields
+		for {
+			next := p.next()
+			if next == nil {
+				return nil, fmt.Errorf("expected , or }")
+			}
+			if next.Type == TokenRightBrace {
+				break
+			}
+			if next.Type != TokenOperator || next.Value != "," {
+				return nil, fmt.Errorf("expected , between record fields")
+			}
+			field, err := p.parseAssign(2)
+			if err != nil {
+				return nil, err
+			}
+			record.Fields[field.Name] = field.Right
+		}
+		return record, nil
+
+	case TokenOperator:
+		switch token.Value {
+		case "-":
+			// Unary minus
+			right, err := p.parseBinary(highestPrec + 1)
+			if err != nil {
+				return nil, err
+			}
+			// Handle constant folding
+			switch right.Type {
+			case NodeInt:
+				return &Object{Type: NodeInt, IntVal: -right.IntVal}, nil
+			case NodeFloat:
+				return &Object{Type: NodeFloat, FloatVal: -right.FloatVal}, nil
+			default:
+				return &Object{Type: NodeBinOp, Op: "-", Left: &Object{Type: NodeInt, IntVal: 0}, Right: right}, nil
+			}
+		case "...":
+			return &Object{Type: NodeSpread}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("unexpected token %v", token)
+}
+
+func (p *parser) parseBinary(prec float64) (*Object, error) {
+	left, err := p.parseUnary(prec)
+	if err != nil {
+		return nil, err
+	}
+
+	for {
+		op := p.peek()
+		if op == nil {
+			break
+		}
+
+		// Handle closing tokens
+		if op.Type == TokenRightParen || op.Type == TokenRightBracket || op.Type == TokenRightBrace {
+			break
+		}
+
+		// Handle juxtaposition (function application)
+		if op.Type != TokenOperator {
+			opPrec := operatorPrecedence[""]
+			if opPrec.pl < prec {
+				break
+			}
+			right, err := p.parseBinary(opPrec.pr)
+			if err != nil {
+				return nil, err
+			}
+			left = &Object{Type: NodeApply, Left: left, Right: right}
+			continue
+		}
+
+		// Handle operators
+		opPrec, ok := operatorPrecedence[op.Value.(string)]
+		if !ok || opPrec.pl < prec {
+			break
+		}
+		p.next() // consume operator
+
+		switch op.Value {
+		case "=":
+			if left.Type != NodeVar {
+				return nil, fmt.Errorf("expected variable name before =")
+			}
+			right, err := p.parseBinary(opPrec.pr)
+			if err != nil {
+				return nil, err
+			}
+			left = &Object{Type: NodeAssign, Name: left.Name, Right: right}
+
+		case "->":
+			right, err := p.parseBinary(opPrec.pr)
+			if err != nil {
+				return nil, err
+			}
+			left = &Object{Type: NodeFunction, Left: left, Right: right}
+
+		case "|>":
+			right, err := p.parseBinary(opPrec.pr)
+			if err != nil {
+				return nil, err
+			}
+			left = &Object{Type: NodeApply, Left: right, Right: left}
+
+		case "<|":
+			right, err := p.parseBinary(opPrec.pr)
+			if err != nil {
+				return nil, err
+			}
+			left = &Object{Type: NodeApply, Left: left, Right: right}
+
+		case ">>", "<<":
+			right, err := p.parseBinary(opPrec.pr)
+			if err != nil {
+				return nil, err
+			}
+			v := gensym()
+			varNode := &Object{Type: NodeVar, Name: v}
+
+			var composed *Object
+			if op.Value == ">>" {
+				composed = &Object{Type: NodeApply, Left: right, Right: &Object{Type: NodeApply, Left: left, Right: varNode}}
+			} else {
+				composed = &Object{Type: NodeApply, Left: left, Right: &Object{Type: NodeApply, Left: right, Right: varNode}}
+			}
+
+			left = &Object{Type: NodeFunction, Left: varNode, Right: composed}
+
+		case ".":
+			right, err := p.parseBinary(opPrec.pr)
+			if err != nil {
+				return nil, err
+			}
+			left = &Object{Type: NodeWhere, Left: left, Right: right}
+
+		case "?":
+			right, err := p.parseBinary(opPrec.pr)
+			if err != nil {
+				return nil, err
+			}
+			left = &Object{Type: NodeAssert, Left: left, Right: right}
+
+		case "@":
+			right, err := p.parseBinary(opPrec.pr)
+			if err != nil {
+				return nil, err
+			}
+			left = &Object{Type: NodeAccess, Left: left, Right: right}
+
+		default:
+			right, err := p.parseBinary(opPrec.pr)
+			if err != nil {
+				return nil, err
+			}
+			left = &Object{Type: NodeBinOp, Op: op.Value.(string), Left: left, Right: right}
+		}
+	}
+
+	return left, nil
+}
+
+func (p *parser) parseAssign(prec float64) (*Object, error) {
+	assign, err := p.parseBinary(prec)
+	if err != nil {
+		return nil, err
+	}
+
+	if assign.Type == NodeSpread {
+		return &Object{Type: NodeAssign, Name: "...", Right: assign}, nil
+	}
+
+	if assign.Type != NodeAssign {
+		return nil, fmt.Errorf("expected assignment in record field")
+	}
+
+	return assign, nil
+}
+
+func Parse(tokens []Token) (*Object, error) {
+	if len(tokens) == 0 {
+		return nil, fmt.Errorf("empty input")
+	}
+
+	p := newParser(tokens)
+	resetGensym()
+
+	ast, err := p.parseBinary(0)
+	if err != nil {
+		return nil, err
+	}
+
+	if p.peek() != nil {
+		return nil, fmt.Errorf("unexpected tokens after expression")
+	}
+
+	return ast, nil
+}
+
+//// EVAL
+
+type Env map[string]*Object
+
+func Match(obj, pattern *Object) (Env, error) {
+	switch pattern.Type {
+	case NodeHole:
+		if obj.Type == NodeHole {
+			return Env{}, nil
+		}
+		return nil, nil
+
+	case NodeInt:
+		if obj.Type == NodeInt && obj.IntVal == pattern.IntVal {
+			return Env{}, nil
+		}
+		return nil, nil
+
+	case NodeFloat:
+		return nil, fmt.Errorf("pattern matching is not supported for Floats")
+
+	case NodeString:
+		if obj.Type == NodeString && obj.StrVal == pattern.StrVal {
+			return Env{}, nil
+		}
+		return nil, nil
+
+	case NodeVar:
+		return Env{pattern.Name: obj}, nil
+
+	case NodeVariant:
+		if obj.Type != NodeVariant {
+			return nil, nil
+		}
+		if obj.Name != pattern.Name {
+			return nil, nil
+		}
+		return Match(obj.Right, pattern.Right)
+
+	case NodeRecord:
+		if obj.Type != NodeRecord {
+			return nil, nil
+		}
+
+		result := make(Env)
+		useSpread := false
+		seenKeys := make(map[string]bool)
+
+		for key, patternItem := range pattern.Fields {
+			if patternItem.Type == NodeSpread {
+				useSpread = true
+				// Handle named spread
+				if patternItem.Name != "" {
+					restRecord := &Object{Type: NodeRecord, Fields: make(map[string]*Object)}
+					for k, v := range obj.Fields {
+						if !seenKeys[k] {
+							restRecord.Fields[k] = v
+						}
+					}
+					result[patternItem.Name] = restRecord
+				}
+				break
+			}
+
+			seenKeys[key] = true
+			objItem, ok := obj.Fields[key]
+			if !ok {
+				return nil, nil
+			}
+
+			part, err := Match(objItem, patternItem)
+			if err != nil {
+				return nil, err
+			}
+			if part == nil {
+				return nil, nil
+			}
+
+			// Merge part into result
+			for k, v := range part {
+				result[k] = v
+			}
+		}
+
+		if !useSpread && len(pattern.Fields) != len(obj.Fields) {
+			return nil, nil
+		}
+
+		return result, nil
+
+	case NodeList:
+		if obj.Type != NodeList {
+			return nil, nil
+		}
+
+		result := make(Env)
+		useSpread := false
+
+		for i, patternItem := range pattern.Params {
+			if patternItem.Type == NodeSpread {
+				useSpread = true
+				// Handle named spread
+				if patternItem.Name != "" {
+					restList := &Object{Type: NodeList, Params: obj.Params[i:]}
+					result[patternItem.Name] = restList
+				}
+				break
+			}
+
+			if i >= len(obj.Params) {
+				return nil, nil
+			}
+
+			part, err := Match(obj.Params[i], patternItem)
+			if err != nil {
+				return nil, err
+			}
+			if part == nil {
+				return nil, nil
+			}
+
+			// Merge part into result
+			for k, v := range part {
+				result[k] = v
+			}
+		}
+
+		if !useSpread && len(pattern.Params) != len(obj.Params) {
+			return nil, nil
+		}
+
+		return result, nil
+
+	default:
+		return nil, fmt.Errorf("match not implemented for %v", pattern.Type)
+	}
+}
+
+type BinopHandler func(env Env, left, right *Object) (*Object, error)
+
+var BINOP_HANDLERS = map[string]BinopHandler{
+	"+": func(env Env, left, right *Object) (*Object, error) {
+		if left.Type == NodeInt && right.Type == NodeInt {
+			return &Object{Type: NodeInt, IntVal: left.IntVal + right.IntVal}, nil
+		} else if left.Type == NodeFloat && right.Type == NodeFloat {
+			return &Object{Type: NodeFloat, FloatVal: left.FloatVal + right.FloatVal}, nil
+		}
+		return nil, fmt.Errorf("cannot add %v and %v", left.Type, right.Type)
+	},
+	"-": func(env Env, left, right *Object) (*Object, error) {
+		if left.Type == NodeInt && right.Type == NodeInt {
+			return &Object{Type: NodeInt, IntVal: left.IntVal - right.IntVal}, nil
+		} else if left.Type == NodeFloat && right.Type == NodeFloat {
+			return &Object{Type: NodeFloat, FloatVal: left.FloatVal - right.FloatVal}, nil
+		}
+		return nil, fmt.Errorf("cannot subtract %v and %v", left.Type, right.Type)
+	},
+	"*": func(env Env, left, right *Object) (*Object, error) {
+		if left.Type == NodeInt && right.Type == NodeInt {
+			return &Object{Type: NodeInt, IntVal: left.IntVal * right.IntVal}, nil
+		} else if left.Type == NodeFloat && right.Type == NodeFloat {
+			return &Object{Type: NodeFloat, FloatVal: left.FloatVal * right.FloatVal}, nil
+		}
+		return nil, fmt.Errorf("cannot multiply %v and %v", left.Type, right.Type)
+	},
+	"/": func(env Env, left, right *Object) (*Object, error) {
+		if left.Type == NodeFloat && right.Type == NodeFloat {
+			return &Object{Type: NodeFloat, FloatVal: left.FloatVal / right.FloatVal}, nil
+		}
+		return nil, fmt.Errorf("cannot divide %v and %v", left.Type, right.Type)
+	},
+	"//": func(env Env, left, right *Object) (*Object, error) {
+		if left.Type == NodeInt && right.Type == NodeInt {
+			return &Object{Type: NodeInt, IntVal: left.IntVal / right.IntVal}, nil
+		}
+		return nil, fmt.Errorf("cannot floor divide %v and %v", left.Type, right.Type)
+	},
+	"^": func(env Env, left, right *Object) (*Object, error) {
+		if left.Type == NodeInt && right.Type == NodeInt {
+			return &Object{Type: NodeInt, IntVal: int64(math.Pow(float64(left.IntVal), float64(right.IntVal)))}, nil
+		} else if left.Type == NodeFloat && right.Type == NodeFloat {
+			return &Object{Type: NodeFloat, FloatVal: math.Pow(left.FloatVal, right.FloatVal)}, nil
+		}
+		return nil, fmt.Errorf("cannot exponentiate %v and %v", left.Type, right.Type)
+	},
+	"%": func(env Env, left, right *Object) (*Object, error) {
+		if left.Type == NodeInt && right.Type == NodeInt {
+			return &Object{Type: NodeInt, IntVal: left.IntVal % right.IntVal}, nil
+		}
+		return nil, fmt.Errorf("cannot mod %v and %v", left.Type, right.Type)
+	},
+	"==": func(env Env, left, right *Object) (*Object, error) {
+		isEqual := reflect.DeepEqual(left, right)
+		return &Object{
+			Type:  NodeVariant,
+			Name:  map[bool]string{true: "true", false: "false"}[isEqual],
+			Right: &Object{Type: NodeHole},
+		}, nil
+	},
+	"/=": func(env Env, left, right *Object) (*Object, error) {
+		isEqual := reflect.DeepEqual(left, right)
+		return &Object{
+			Type:  NodeVariant,
+			Name:  map[bool]string{true: "false", false: "true"}[isEqual],
+			Right: &Object{Type: NodeHole},
+		}, nil
+	},
+	"<": func(env Env, left, right *Object) (*Object, error) {
+		if left.Type == NodeInt && right.Type == NodeInt {
+			result := left.IntVal < right.IntVal
+			return &Object{
+				Type:  NodeVariant,
+				Name:  map[bool]string{true: "true", false: "false"}[result],
+				Right: &Object{Type: NodeHole},
+			}, nil
+		} else if left.Type == NodeFloat && right.Type == NodeFloat {
+			result := left.FloatVal < right.FloatVal
+			return &Object{
+				Type:  NodeVariant,
+				Name:  map[bool]string{true: "true", false: "false"}[result],
+				Right: &Object{Type: NodeHole},
+			}, nil
+		}
+		return nil, fmt.Errorf("cannot compare %v and %v", left.Type, right.Type)
+	},
+	">": func(env Env, left, right *Object) (*Object, error) {
+		if left.Type == NodeInt && right.Type == NodeInt {
+			result := left.IntVal > right.IntVal
+			return &Object{
+				Type:  NodeVariant,
+				Name:  map[bool]string{true: "true", false: "false"}[result],
+				Right: &Object{Type: NodeHole},
+			}, nil
+		} else if left.Type == NodeFloat && right.Type == NodeFloat {
+			result := left.FloatVal > right.FloatVal
+			return &Object{
+				Type:  NodeVariant,
+				Name:  map[bool]string{true: "true", false: "false"}[result],
+				Right: &Object{Type: NodeHole},
+			}, nil
+		}
+		return nil, fmt.Errorf("cannot compare %v and %v", left.Type, right.Type)
+	},
+	"<=": func(env Env, left, right *Object) (*Object, error) {
+		if left.Type == NodeInt && right.Type == NodeInt {
+			result := left.IntVal <= right.IntVal
+			return &Object{
+				Type:  NodeVariant,
+				Name:  map[bool]string{true: "true", false: "false"}[result],
+				Right: &Object{Type: NodeHole},
+			}, nil
+		} else if left.Type == NodeFloat && right.Type == NodeFloat {
+			result := left.FloatVal <= right.FloatVal
+			return &Object{
+				Type:  NodeVariant,
+				Name:  map[bool]string{true: "true", false: "false"}[result],
+				Right: &Object{Type: NodeHole},
+			}, nil
+		}
+		return nil, fmt.Errorf("cannot compare %v and %v", left.Type, right.Type)
+	},
+	">=": func(env Env, left, right *Object) (*Object, error) {
+		if left.Type == NodeInt && right.Type == NodeInt {
+			result := left.IntVal >= right.IntVal
+			return &Object{
+				Type:  NodeVariant,
+				Name:  map[bool]string{true: "true", false: "false"}[result],
+				Right: &Object{Type: NodeHole},
+			}, nil
+		} else if left.Type == NodeFloat && right.Type == NodeFloat {
+			result := left.FloatVal >= right.FloatVal
+			return &Object{
+				Type:  NodeVariant,
+				Name:  map[bool]string{true: "true", false: "false"}[result],
+				Right: &Object{Type: NodeHole},
+			}, nil
+		}
+		return nil, fmt.Errorf("cannot compare %v and %v", left.Type, right.Type)
+	},
+	"&&": func(env Env, left, right *Object) (*Object, error) {
+		if left.Type == NodeVariant && left.Name == "false" {
+			return left, nil // Short circuit
+		}
+		if left.Type != NodeVariant || (left.Name != "true" && left.Name != "false") {
+			return nil, fmt.Errorf("expected boolean variant, got %v", left.Type)
+		}
+		if right.Type != NodeVariant || (right.Name != "true" && right.Name != "false") {
+			return nil, fmt.Errorf("expected boolean variant, got %v", right.Type)
+		}
+		result := left.Name == "true" && right.Name == "true"
+		return &Object{
+			Type:  NodeVariant,
+			Name:  map[bool]string{true: "true", false: "false"}[result],
+			Right: &Object{Type: NodeHole},
+		}, nil
+	},
+	"||": func(env Env, left, right *Object) (*Object, error) {
+		if left.Type == NodeVariant && left.Name == "true" {
+			return left, nil // Short circuit
+		}
+		if left.Type != NodeVariant || (left.Name != "true" && left.Name != "false") {
+			return nil, fmt.Errorf("expected boolean variant, got %v", left.Type)
+		}
+		if right.Type != NodeVariant || (right.Name != "true" && right.Name != "false") {
+			return nil, fmt.Errorf("expected boolean variant, got %v", right.Type)
+		}
+		result := left.Name == "true" || right.Name == "true"
+		return &Object{
+			Type:  NodeVariant,
+			Name:  map[bool]string{true: "true", false: "false"}[result],
+			Right: &Object{Type: NodeHole},
+		}, nil
+	},
+	"++": func(env Env, left, right *Object) (*Object, error) {
+		if left.Type == NodeString && right.Type == NodeString {
+			return &Object{Type: NodeString, StrVal: left.StrVal + right.StrVal}, nil
+		}
+		return nil, fmt.Errorf("cannot concatenate %v and %v", left.Type, right.Type)
+	},
+	">+": func(env Env, left, right *Object) (*Object, error) {
+		if right.Type != NodeList {
+			return nil, fmt.Errorf("list cons requires list on right, got %v", right.Type)
+		}
+		params := make([]*Object, len(right.Params)+1)
+		params[0] = left
+		copy(params[1:], right.Params)
+		return &Object{Type: NodeList, Params: params}, nil
+	},
+	"+<": func(env Env, left, right *Object) (*Object, error) {
+		if left.Type != NodeList {
+			return nil, fmt.Errorf("list append requires list on left, got %v", left.Type)
+		}
+		params := make([]*Object, len(left.Params)+1)
+		copy(params, left.Params)
+		params[len(left.Params)] = right
+		return &Object{Type: NodeList, Params: params}, nil
+	},
+	// "!": func(env Env, left, right *Object) (*Object, error) {
+	// 	return eval_exp(env, right), nil
+	// },
+}
+
+func eval_exp(env Env, exp *Object) *Object {
+	switch exp.Type {
+	// Base cases - return the values directly
+	case NodeInt, NodeFloat, NodeString, NodeBytes, NodeHole:
+		return exp
+
+	// Variable lookup
+	case NodeVar:
+		value, ok := env[exp.Name]
+		if !ok {
+			panic(fmt.Sprintf("name '%s' is not defined", exp.Name))
+		}
+		return value
+
+	// Constructor cases
+	case NodeVariant:
+		return &Object{
+			Type:  NodeVariant,
+			Name:  exp.Name,                 // Tag stored in Name
+			Right: eval_exp(env, exp.Right), // Value stored in Right
+		}
+
+	case NodeList:
+		params := make([]*Object, len(exp.Params))
+		for i, item := range exp.Params {
+			params[i] = eval_exp(env, item)
+		}
+		return &Object{
+			Type:   NodeList,
+			Params: params,
+		}
+
+	case NodeRecord:
+		fields := make(map[string]*Object)
+		for k, v := range exp.Fields {
+			fields[k] = eval_exp(env, v)
+		}
+		return &Object{
+			Type:   NodeRecord,
+			Fields: fields,
+		}
+
+	// Pattern matching and functions
+	case NodeFunction:
+		if exp.Left.Type != NodeVar {
+			panic(fmt.Sprintf("expected variable in function definition %v", exp.Left))
+		}
+		// Create closure by capturing current environment
+		return &Object{
+			Type:   NodeFunction,
+			Left:   exp.Left,  // Arg
+			Right:  exp.Right, // Body
+			Fields: env,       // Captured environment stored in Fields
+		}
+
+	case NodeMatchFunction:
+		// Similar to function, create closure
+		return &Object{
+			Type:   NodeMatchFunction,
+			Params: exp.Params, // Cases
+			Fields: env,        // Captured environment
+		}
+
+	// Application and special forms
+	case NodeApply:
+		// Special case for quote
+		if exp.Left.Type == NodeVar && exp.Left.Name == "$$quote" {
+			return exp.Right
+		}
+
+		callee := eval_exp(env, exp.Left)
+		arg := eval_exp(env, exp.Right)
+
+		switch callee.Type {
+		case NodeFunction:
+			// Create new environment with captured env + arg binding
+			newEnv := make(Env)
+			for k, v := range callee.Fields { // Captured env
+				newEnv[k] = v
+			}
+			newEnv[callee.Left.Name] = arg // Bind argument
+			return eval_exp(newEnv, callee.Right)
+
+		case NodeMatchFunction:
+			for _, caseObj := range callee.Params {
+				// Each case has pattern in Left and body in Right
+				if m, _ := Match(arg, caseObj.Left); m != nil {
+					newEnv := make(Env)
+					for k, v := range callee.Fields {
+						newEnv[k] = v
+					}
+					for k, v := range m {
+						newEnv[k] = v
+					}
+					return eval_exp(newEnv, caseObj.Right)
+				}
+			}
+			panic("no matching cases")
+
+		default:
+			panic(fmt.Sprintf("attempted to apply a non-function of type %v", callee.Type))
+		}
+
+	case NodeAccess:
+		obj := eval_exp(env, exp.Left)
+		switch obj.Type {
+		case NodeRecord:
+			if exp.Right.Type == NodeVar {
+				if val, ok := obj.Fields[exp.Right.Name]; ok {
+					return val
+				}
+				panic(fmt.Sprintf("no assignment to %s found in record", exp.Right.Name))
+			}
+			panic(fmt.Sprintf("cannot access record field using %v, expected a field name", exp.Right.Type))
+
+		case NodeList:
+			idx := eval_exp(env, exp.Right)
+			if idx.Type == NodeInt {
+				if idx.IntVal < 0 || idx.IntVal >= int64(len(obj.Params)) {
+					panic(fmt.Sprintf("index %d out of bounds for list", idx.IntVal))
+				}
+				return obj.Params[idx.IntVal]
+			}
+			panic(fmt.Sprintf("cannot index into list using type %v, expected integer", idx.Type))
+
+		default:
+			panic(fmt.Sprintf("attempted to access from type %v", obj.Type))
+		}
+
+	// Environment manipulation
+	case NodeAssign:
+		if exp.Left.Type != NodeVar {
+			panic("expected variable name in assignment")
+		}
+
+		value := eval_exp(env, exp.Right)
+
+		// Handle function recursion by allowing function to reference itself
+		if value.Type == NodeFunction || value.Type == NodeMatchFunction {
+			valueCopy := *value
+			newEnv := make(Env)
+			for k, v := range value.Fields {
+				newEnv[k] = v
+			}
+			newEnv[exp.Left.Name] = &valueCopy
+			valueCopy.Fields = newEnv
+			value = &valueCopy
+		}
+
+		newEnv := make(Env)
+		for k, v := range env {
+			newEnv[k] = v
+		}
+		newEnv[exp.Left.Name] = value
+		return &Object{
+			Type:   NodeRecord, // Using Record to represent EnvObject
+			Fields: newEnv,
+		}
+
+	case NodeWhere:
+		if exp.Right.Type == NodeAssign {
+			resEnv := eval_exp(env, exp.Right)
+			if resEnv.Type == NodeRecord { // EnvObject
+				newEnv := make(Env)
+				for k, v := range env {
+					newEnv[k] = v
+				}
+				for k, v := range resEnv.Fields {
+					newEnv[k] = v
+				}
+				return eval_exp(newEnv, exp.Left)
+			}
+		}
+		panic("binding in where must be an assignment")
+
+	case NodeAssert:
+		cond := eval_exp(env, exp.Right)
+		if cond.Type != NodeVariant || cond.Name != "true" {
+			panic(fmt.Sprintf("condition %v failed", exp.Right))
+		}
+		return eval_exp(env, exp.Left)
+
+	case NodeBinOp:
+		handler, ok := BINOP_HANDLERS[exp.Op]
+		if !ok {
+			panic(fmt.Sprintf("no handler for %v", exp.Op))
+		}
+		result, err := handler(env, exp.Left, exp.Right)
+		if err != nil {
+			panic(err)
+		}
+		return result
+
+	case NodeSpread:
+		panic("cannot evaluate a spread")
+
+	default:
+		panic(fmt.Sprintf("eval_exp not implemented for %v", exp.Type))
+	}
+}

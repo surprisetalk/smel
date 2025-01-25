@@ -8,6 +8,7 @@
 package smel_test
 
 import (
+	"reflect"
 	. "smel"
 	"strings"
 	"testing"
@@ -1075,3 +1076,988 @@ func TestWhitespaceHandling(t *testing.T) {
 		})
 	}
 }
+
+func TestParseBasicLiterals(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected *Object
+	}{
+		{
+			name:  "parse single digit",
+			input: "1",
+			expected: &Object{
+				Type:   NodeInt,
+				IntVal: 1,
+			},
+		},
+		{
+			name:  "parse multiple digits",
+			input: "123",
+			expected: &Object{
+				Type:   NodeInt,
+				IntVal: 123,
+			},
+		},
+		{
+			name:  "parse negative int",
+			input: "-123",
+			expected: &Object{
+				Type:   NodeInt,
+				IntVal: -123,
+			},
+		},
+		{
+			name:  "parse decimal",
+			input: "3.14",
+			expected: &Object{
+				Type:     NodeFloat,
+				FloatVal: 3.14,
+			},
+		},
+		{
+			name:  "parse negative decimal",
+			input: "-3.14",
+			expected: &Object{
+				Type:     NodeFloat,
+				FloatVal: -3.14,
+			},
+		},
+		{
+			name:  "parse string",
+			input: `"hello"`,
+			expected: &Object{
+				Type:   NodeString,
+				StrVal: "hello",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tokens, err := Lex(tt.input)
+			if err != nil {
+				t.Fatalf("failed to tokenize input: %v", err)
+			}
+
+			got, err := Parse(tokens)
+			if err != nil {
+				t.Fatalf("failed to parse tokens: %v", err)
+			}
+
+			if !objectsEqual(got, tt.expected) {
+				t.Errorf("\nwant: %+v\ngot:  %+v", tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestParseVariables(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected *Object
+	}{
+		{
+			name:  "parse simple variable",
+			input: "abc_123",
+			expected: &Object{
+				Type: NodeVar,
+				Name: "abc_123",
+			},
+		},
+		{
+			name:  "parse sha variable",
+			input: "$sha1'abc",
+			expected: &Object{
+				Type: NodeVar,
+				Name: "$sha1'abc",
+			},
+		},
+		{
+			name:  "parse sha variable without quote",
+			input: "$sha1abc",
+			expected: &Object{
+				Type: NodeVar,
+				Name: "$sha1abc",
+			},
+		},
+		{
+			name:  "parse dollar variable",
+			input: "$",
+			expected: &Object{
+				Type: NodeVar,
+				Name: "$",
+			},
+		},
+		{
+			name:  "parse double dollar variable",
+			input: "$$",
+			expected: &Object{
+				Type: NodeVar,
+				Name: "$$",
+			},
+		},
+		{
+			name:  "parse double dollar variable with name",
+			input: "$$bills",
+			expected: &Object{
+				Type: NodeVar,
+				Name: "$$bills",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tokens, err := Lex(tt.input)
+			if err != nil {
+				t.Fatalf("failed to tokenize input: %v", err)
+			}
+
+			got, err := Parse(tokens)
+			if err != nil {
+				t.Fatalf("failed to parse tokens: %v", err)
+			}
+
+			if !objectsEqual(got, tt.expected) {
+				t.Errorf("\nwant: %+v\ngot:  %+v", tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestParseBinaryOperations(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected *Object
+	}{
+		{
+			name:  "parse binary add",
+			input: "1 + 2",
+			expected: &Object{
+				Type: NodeBinOp,
+				Op:   "+",
+				Left: &Object{
+					Type:   NodeInt,
+					IntVal: 1,
+				},
+				Right: &Object{
+					Type:   NodeInt,
+					IntVal: 2,
+				},
+			},
+		},
+		{
+			name:  "parse binary subtract",
+			input: "1 - 2",
+			expected: &Object{
+				Type: NodeBinOp,
+				Op:   "-",
+				Left: &Object{
+					Type:   NodeInt,
+					IntVal: 1,
+				},
+				Right: &Object{
+					Type:   NodeInt,
+					IntVal: 2,
+				},
+			},
+		},
+		{
+			name:  "parse chained add",
+			input: "1 + 2 + 3",
+			expected: &Object{
+				Type: NodeBinOp,
+				Op:   "+",
+				Left: &Object{
+					Type: NodeBinOp,
+					Op:   "+",
+					Left: &Object{
+						Type:   NodeInt,
+						IntVal: 1,
+					},
+					Right: &Object{
+						Type:   NodeInt,
+						IntVal: 2,
+					},
+				},
+				Right: &Object{
+					Type:   NodeInt,
+					IntVal: 3,
+				},
+			},
+		},
+		{
+			name:  "parse multiply binds tighter than add",
+			input: "1 + 2 * 3",
+			expected: &Object{
+				Type: NodeBinOp,
+				Op:   "+",
+				Left: &Object{
+					Type:   NodeInt,
+					IntVal: 1,
+				},
+				Right: &Object{
+					Type: NodeBinOp,
+					Op:   "*",
+					Left: &Object{
+						Type:   NodeInt,
+						IntVal: 2,
+					},
+					Right: &Object{
+						Type:   NodeInt,
+						IntVal: 3,
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tokens, err := Lex(tt.input)
+			if err != nil {
+				t.Fatalf("failed to tokenize input: %v", err)
+			}
+
+			got, err := Parse(tokens)
+			if err != nil {
+				t.Fatalf("failed to parse tokens: %v", err)
+			}
+
+			if !objectsEqual(got, tt.expected) {
+				t.Errorf("\nwant: %+v\ngot:  %+v", tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestParseListsAndRecords(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected *Object
+	}{
+		{
+			name:  "parse empty list",
+			input: "[]",
+			expected: &Object{
+				Type:   NodeList,
+				Params: []*Object{},
+			},
+		},
+		{
+			name:  "parse list with items",
+			input: "[1, 2]",
+			expected: &Object{
+				Type: NodeList,
+				Params: []*Object{
+					{Type: NodeInt, IntVal: 1},
+					{Type: NodeInt, IntVal: 2},
+				},
+			},
+		},
+		{
+			name:  "parse empty record",
+			input: "{}",
+			expected: &Object{
+				Type:   NodeRecord,
+				Fields: map[string]*Object{},
+			},
+		},
+		{
+			name:  "parse record with single field",
+			input: "{x = 1}",
+			expected: &Object{
+				Type: NodeRecord,
+				Fields: map[string]*Object{
+					"x": {Type: NodeInt, IntVal: 1},
+				},
+			},
+		},
+		{
+			name:  "parse record with multiple fields",
+			input: "{x = 1, y = 2}",
+			expected: &Object{
+				Type: NodeRecord,
+				Fields: map[string]*Object{
+					"x": {Type: NodeInt, IntVal: 1},
+					"y": {Type: NodeInt, IntVal: 2},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tokens, err := Lex(tt.input)
+			if err != nil {
+				t.Fatalf("failed to tokenize input: %v", err)
+			}
+
+			got, err := Parse(tokens)
+			if err != nil {
+				t.Fatalf("failed to parse tokens: %v", err)
+			}
+
+			if !objectsEqual(got, tt.expected) {
+				t.Errorf("\nwant: %+v\ngot:  %+v", tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestParseFunctions(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected *Object
+	}{
+		{
+			name:  "parse simple function",
+			input: "x -> x + 1",
+			expected: &Object{
+				Type: NodeFunction,
+				Left: &Object{Type: NodeVar, Name: "x"},
+				Right: &Object{
+					Type:  NodeBinOp,
+					Op:    "+",
+					Left:  &Object{Type: NodeVar, Name: "x"},
+					Right: &Object{Type: NodeInt, IntVal: 1},
+				},
+			},
+		},
+		{
+			name:  "parse function with two args",
+			input: "a -> b -> a + b",
+			expected: &Object{
+				Type: NodeFunction,
+				Left: &Object{Type: NodeVar, Name: "a"},
+				Right: &Object{
+					Type: NodeFunction,
+					Left: &Object{Type: NodeVar, Name: "b"},
+					Right: &Object{
+						Type:  NodeBinOp,
+						Op:    "+",
+						Left:  &Object{Type: NodeVar, Name: "a"},
+						Right: &Object{Type: NodeVar, Name: "b"},
+					},
+				},
+			},
+		},
+		{
+			name:  "parse function application",
+			input: "f a",
+			expected: &Object{
+				Type:  NodeApply,
+				Left:  &Object{Type: NodeVar, Name: "f"},
+				Right: &Object{Type: NodeVar, Name: "a"},
+			},
+		},
+		{
+			name:  "parse function application two args",
+			input: "f a b",
+			expected: &Object{
+				Type: NodeApply,
+				Left: &Object{
+					Type:  NodeApply,
+					Left:  &Object{Type: NodeVar, Name: "f"},
+					Right: &Object{Type: NodeVar, Name: "a"},
+				},
+				Right: &Object{Type: NodeVar, Name: "b"},
+			},
+		},
+		{
+			name:  "parse function assignment",
+			input: "id = x -> x",
+			expected: &Object{
+				Type: NodeAssign,
+				Name: "id",
+				Right: &Object{
+					Type:  NodeFunction,
+					Left:  &Object{Type: NodeVar, Name: "x"},
+					Right: &Object{Type: NodeVar, Name: "x"},
+				},
+			},
+		},
+	}
+
+	runParseTests(t, tests)
+}
+
+func TestParseComposition(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected *Object
+	}{
+		{
+			name:  "parse forward compose",
+			input: "f >> g",
+			expected: &Object{
+				Type: NodeFunction,
+				Left: &Object{Type: NodeVar, Name: "$v0"},
+				Right: &Object{
+					Type: NodeApply,
+					Left: &Object{Type: NodeVar, Name: "g"},
+					Right: &Object{
+						Type:  NodeApply,
+						Left:  &Object{Type: NodeVar, Name: "f"},
+						Right: &Object{Type: NodeVar, Name: "$v0"},
+					},
+				},
+			},
+		},
+		{
+			name:  "parse backward compose",
+			input: "f << g",
+			expected: &Object{
+				Type: NodeFunction,
+				Left: &Object{Type: NodeVar, Name: "$v0"},
+				Right: &Object{
+					Type: NodeApply,
+					Left: &Object{Type: NodeVar, Name: "f"},
+					Right: &Object{
+						Type:  NodeApply,
+						Left:  &Object{Type: NodeVar, Name: "g"},
+						Right: &Object{Type: NodeVar, Name: "$v0"},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// resetGensym() // Reset symbol counter before each test
+			tokens, err := Lex(tt.input)
+			if err != nil {
+				t.Fatalf("failed to tokenize input: %v", err)
+			}
+
+			got, err := Parse(tokens)
+			if err != nil {
+				t.Fatalf("failed to parse tokens: %v", err)
+			}
+
+			if !objectsEqual(got, tt.expected) {
+				t.Errorf("\nwant: %+v\ngot:  %+v", tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestParsePipes(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected *Object
+	}{
+		{
+			name:  "parse forward pipe",
+			input: "1 |> f",
+			expected: &Object{
+				Type:  NodeApply,
+				Left:  &Object{Type: NodeVar, Name: "f"},
+				Right: &Object{Type: NodeInt, IntVal: 1},
+			},
+		},
+		{
+			name:  "parse backward pipe",
+			input: "f <| 1",
+			expected: &Object{
+				Type:  NodeApply,
+				Left:  &Object{Type: NodeVar, Name: "f"},
+				Right: &Object{Type: NodeInt, IntVal: 1},
+			},
+		},
+		{
+			name:  "parse nested forward pipe",
+			input: "1 |> f |> g",
+			expected: &Object{
+				Type: NodeApply,
+				Left: &Object{Type: NodeVar, Name: "g"},
+				Right: &Object{
+					Type:  NodeApply,
+					Left:  &Object{Type: NodeVar, Name: "f"},
+					Right: &Object{Type: NodeInt, IntVal: 1},
+				},
+			},
+		},
+	}
+
+	runParseTests(t, tests)
+}
+
+func TestParseVariants(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected *Object
+	}{
+		{
+			name:  "parse simple variant",
+			input: "#abc 1",
+			expected: &Object{
+				Type:  NodeVariant,
+				Name:  "abc",
+				Right: &Object{Type: NodeInt, IntVal: 1},
+			},
+		},
+		{
+			name:  "parse variant with expression",
+			input: "#some (1 + 2)",
+			expected: &Object{
+				Type: NodeVariant,
+				Name: "some",
+				Right: &Object{
+					Type:  NodeBinOp,
+					Op:    "+",
+					Left:  &Object{Type: NodeInt, IntVal: 1},
+					Right: &Object{Type: NodeInt, IntVal: 2},
+				},
+			},
+		},
+	}
+
+	runParseTests(t, tests)
+}
+
+func TestParseSpecialOperators(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected *Object
+	}{
+		{
+			name:  "parse where",
+			input: "a . b",
+			expected: &Object{
+				Type:  NodeWhere,
+				Left:  &Object{Type: NodeVar, Name: "a"},
+				Right: &Object{Type: NodeVar, Name: "b"},
+			},
+		},
+		{
+			name:  "parse nested where",
+			input: "a . b . c",
+			expected: &Object{
+				Type: NodeWhere,
+				Left: &Object{
+					Type:  NodeWhere,
+					Left:  &Object{Type: NodeVar, Name: "a"},
+					Right: &Object{Type: NodeVar, Name: "b"},
+				},
+				Right: &Object{Type: NodeVar, Name: "c"},
+			},
+		},
+		{
+			name:  "parse assert",
+			input: "a ? b",
+			expected: &Object{
+				Type:  NodeAssert,
+				Left:  &Object{Type: NodeVar, Name: "a"},
+				Right: &Object{Type: NodeVar, Name: "b"},
+			},
+		},
+		{
+			name:  "parse record access",
+			input: "r@a",
+			expected: &Object{
+				Type:  NodeAccess,
+				Left:  &Object{Type: NodeVar, Name: "r"},
+				Right: &Object{Type: NodeVar, Name: "a"},
+			},
+		},
+	}
+
+	runParseTests(t, tests)
+}
+
+func TestParseErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr string
+	}{
+		{
+			name:    "empty input",
+			input:   "",
+			wantErr: "empty input",
+		},
+		{
+			name:    "unterminated string",
+			input:   `"hello`,
+			wantErr: "unterminated string",
+		},
+		{
+			name:    "invalid record assignment",
+			input:   "{1 = 2}",
+			wantErr: "expected variable",
+		},
+		{
+			name:    "trailing comma in list",
+			input:   "[1,]",
+			wantErr: "expected",
+		},
+		{
+			name:    "missing variant name",
+			input:   "#",
+			wantErr: "unexpected end",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tokens, err := Lex(tt.input)
+			if err != nil {
+				// If the error occurs during tokenization, that's fine
+				if tt.wantErr != "" && contains(err.Error(), tt.wantErr) {
+					return
+				}
+				t.Fatalf("unexpected tokenization error: %v", err)
+			}
+
+			_, err = Parse(tokens)
+			if err == nil {
+				t.Error("expected error but got none")
+				return
+			}
+			if !contains(err.Error(), tt.wantErr) {
+				t.Errorf("want error containing %q, got %q", tt.wantErr, err.Error())
+			}
+		})
+	}
+}
+
+// Helper functions
+
+func runParseTests(t *testing.T, tests []struct {
+	name     string
+	input    string
+	expected *Object
+},
+) {
+	t.Helper()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tokens, err := Lex(tt.input)
+			if err != nil {
+				t.Fatalf("failed to tokenize input: %v", err)
+			}
+
+			got, err := Parse(tokens)
+			if err != nil {
+				t.Fatalf("failed to parse tokens: %v", err)
+			}
+
+			if !objectsEqual(got, tt.expected) {
+				t.Errorf("\nwant: %+v\ngot:  %+v", tt.expected, got)
+			}
+		})
+	}
+}
+
+func contains(s, substr string) bool {
+	return strings.Contains(strings.ToLower(s), strings.ToLower(substr))
+}
+
+// Helper function to compare two AST objects
+func objectsEqual(a, b *Object) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+
+	if a.Type != b.Type {
+		return false
+	}
+
+	switch a.Type {
+	case NodeInt:
+		return a.IntVal == b.IntVal
+	case NodeFloat:
+		return a.FloatVal == b.FloatVal
+	case NodeString:
+		return a.StrVal == b.StrVal
+	case NodeVar:
+		return a.Name == b.Name
+	case NodeBinOp:
+		return a.Op == b.Op && objectsEqual(a.Left, b.Left) && objectsEqual(a.Right, b.Right)
+	case NodeList:
+		if len(a.Params) != len(b.Params) {
+			return false
+		}
+		for i := range a.Params {
+			if !objectsEqual(a.Params[i], b.Params[i]) {
+				return false
+			}
+		}
+		return true
+	case NodeRecord:
+		if len(a.Fields) != len(b.Fields) {
+			return false
+		}
+		for k, v1 := range a.Fields {
+			v2, ok := b.Fields[k]
+			if !ok || !objectsEqual(v1, v2) {
+				return false
+			}
+		}
+		return true
+	default:
+		return a.Name == b.Name && objectsEqual(a.Left, b.Left) && objectsEqual(a.Right, b.Right)
+	}
+}
+
+func TestMatch(t *testing.T) {
+	tests := []struct {
+		name    string
+		obj     *Object
+		pattern *Object
+		want    Env
+		wantErr bool
+		errStr  string
+	}{
+		{
+			name:    "match hole with non-hole returns none",
+			obj:     &Object{Type: NodeInt, IntVal: 1},
+			pattern: &Object{Type: NodeHole},
+			want:    nil,
+		},
+		{
+			name:    "match hole with hole returns empty dict",
+			obj:     &Object{Type: NodeHole},
+			pattern: &Object{Type: NodeHole},
+			want:    Env{},
+		},
+		{
+			name:    "match with equal ints returns empty dict",
+			obj:     &Object{Type: NodeInt, IntVal: 1},
+			pattern: &Object{Type: NodeInt, IntVal: 1},
+			want:    Env{},
+		},
+		{
+			name:    "match with inequal ints returns none",
+			obj:     &Object{Type: NodeInt, IntVal: 2},
+			pattern: &Object{Type: NodeInt, IntVal: 1},
+			want:    nil,
+		},
+		{
+			name:    "match int with non-int returns none",
+			obj:     &Object{Type: NodeString, StrVal: "abc"},
+			pattern: &Object{Type: NodeInt, IntVal: 1},
+			want:    nil,
+		},
+		{
+			name:    "match with equal floats raises match error",
+			obj:     &Object{Type: NodeFloat, FloatVal: 1},
+			pattern: &Object{Type: NodeFloat, FloatVal: 1},
+			wantErr: true,
+			errStr:  "pattern matching is not supported for Floats",
+		},
+		{
+			name:    "match with equal strings returns empty dict",
+			obj:     &Object{Type: NodeString, StrVal: "a"},
+			pattern: &Object{Type: NodeString, StrVal: "a"},
+			want:    Env{},
+		},
+		{
+			name:    "match with inequal strings returns none",
+			obj:     &Object{Type: NodeString, StrVal: "b"},
+			pattern: &Object{Type: NodeString, StrVal: "a"},
+			want:    nil,
+		},
+		{
+			name:    "match string with non-string returns none",
+			obj:     &Object{Type: NodeInt, IntVal: 1},
+			pattern: &Object{Type: NodeString, StrVal: "abc"},
+			want:    nil,
+		},
+		{
+			name:    "match var returns dict with var name",
+			obj:     &Object{Type: NodeString, StrVal: "abc"},
+			pattern: &Object{Type: NodeVar, Name: "a"},
+			want:    Env{"a": &Object{Type: NodeString, StrVal: "abc"}},
+		},
+		{
+			name: "match record with non-record returns none",
+			obj:  &Object{Type: NodeInt, IntVal: 2},
+			pattern: &Object{
+				Type: NodeRecord,
+				Fields: map[string]*Object{
+					"x": {Type: NodeVar, Name: "x"},
+					"y": {Type: NodeVar, Name: "y"},
+				},
+			},
+			want: nil,
+		},
+		{
+			name: "match record with vars returns dict with keys",
+			obj: &Object{
+				Type: NodeRecord,
+				Fields: map[string]*Object{
+					"x": {Type: NodeInt, IntVal: 1},
+					"y": {Type: NodeInt, IntVal: 2},
+				},
+			},
+			pattern: &Object{
+				Type: NodeRecord,
+				Fields: map[string]*Object{
+					"x": {Type: NodeVar, Name: "x"},
+					"y": {Type: NodeVar, Name: "y"},
+				},
+			},
+			want: Env{
+				"x": &Object{Type: NodeInt, IntVal: 1},
+				"y": &Object{Type: NodeInt, IntVal: 2},
+			},
+		},
+		{
+			name: "match list with vars returns dict with keys",
+			obj: &Object{
+				Type: NodeList,
+				Params: []*Object{
+					{Type: NodeInt, IntVal: 1},
+					{Type: NodeInt, IntVal: 2},
+				},
+			},
+			pattern: &Object{
+				Type: NodeList,
+				Params: []*Object{
+					{Type: NodeVar, Name: "x"},
+					{Type: NodeVar, Name: "y"},
+				},
+			},
+			want: Env{
+				"x": &Object{Type: NodeInt, IntVal: 1},
+				"y": &Object{Type: NodeInt, IntVal: 2},
+			},
+		},
+		{
+			name: "match list with spread returns empty dict",
+			obj: &Object{
+				Type: NodeList,
+				Params: []*Object{
+					{Type: NodeInt, IntVal: 1},
+					{Type: NodeInt, IntVal: 2},
+					{Type: NodeInt, IntVal: 3},
+				},
+			},
+			pattern: &Object{
+				Type: NodeList,
+				Params: []*Object{
+					{Type: NodeInt, IntVal: 1},
+					{Type: NodeSpread},
+				},
+			},
+			want: Env{},
+		},
+		{
+			name: "match list with named spread",
+			obj: &Object{
+				Type: NodeList,
+				Params: []*Object{
+					{Type: NodeInt, IntVal: 1},
+					{Type: NodeInt, IntVal: 2},
+					{Type: NodeInt, IntVal: 3},
+					{Type: NodeInt, IntVal: 4},
+				},
+			},
+			pattern: &Object{
+				Type: NodeList,
+				Params: []*Object{
+					{Type: NodeVar, Name: "a"},
+					{Type: NodeInt, IntVal: 2},
+					{Type: NodeSpread, Name: "rest"},
+				},
+			},
+			want: Env{
+				"a": &Object{Type: NodeInt, IntVal: 1},
+				"rest": &Object{
+					Type: NodeList,
+					Params: []*Object{
+						{Type: NodeInt, IntVal: 3},
+						{Type: NodeInt, IntVal: 4},
+					},
+				},
+			},
+		},
+		{
+			name: "match record with spread returns empty dict",
+			obj: &Object{
+				Type: NodeRecord,
+				Fields: map[string]*Object{
+					"a": {Type: NodeInt, IntVal: 1},
+					"b": {Type: NodeInt, IntVal: 2},
+				},
+			},
+			pattern: &Object{
+				Type: NodeRecord,
+				Fields: map[string]*Object{
+					"a":   {Type: NodeInt, IntVal: 1},
+					"...": {Type: NodeSpread},
+				},
+			},
+			want: Env{},
+		},
+		{
+			name: "match variant with equal tag returns empty dict",
+			obj: &Object{
+				Type:  NodeVariant,
+				Name:  "abc",
+				Right: &Object{Type: NodeHole},
+			},
+			pattern: &Object{
+				Type:  NodeVariant,
+				Name:  "abc",
+				Right: &Object{Type: NodeHole},
+			},
+			want: Env{},
+		},
+		{
+			name: "match variant with inequal tag returns none",
+			obj: &Object{
+				Type:  NodeVariant,
+				Name:  "def",
+				Right: &Object{Type: NodeHole},
+			},
+			pattern: &Object{
+				Type:  NodeVariant,
+				Name:  "abc",
+				Right: &Object{Type: NodeHole},
+			},
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Match(tt.obj, tt.pattern)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("match() error = nil, wantErr %v", tt.wantErr)
+					return
+				}
+				if err.Error() != tt.errStr {
+					t.Errorf("match() error = %v, wantErr %v", err, tt.errStr)
+					return
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("match() unexpected error: %v", err)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("match() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TODO: eval tests
