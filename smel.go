@@ -1,4 +1,4 @@
-package main
+package smel
 
 import (
 	"fmt"
