@@ -2059,5 +2059,3 @@ func TestMatch(t *testing.T) {
 		})
 	}
 }
-
-// TODO: eval tests

@@ -289,6 +289,14 @@ const (
 	TagTag
 )
 
+func tagOp(op string) cbor.RawMessage {
+	op_, err := cbor.Marshal(cbor.RawTag{TagOp, []byte(op)})
+	if err != nil {
+		panic(err)
+	}
+	return op_
+}
+
 type prec struct {
 	pl float64
 	pr float64
@@ -327,10 +335,6 @@ func resetGensym() {
 type parser struct {
 	tokens []Token
 	pos    int
-}
-
-func newParser(tokens []Token) *parser {
-	return &parser{tokens: tokens}
 }
 
 func (p *parser) peek() *Token {
@@ -477,14 +481,6 @@ func (p *parser) parseUnary(prec float64) (cbor.RawMessage, error) {
 	return nil, fmt.Errorf("unexpected token %v", token)
 }
 
-func tagOp(op string) cbor.RawMessage {
-	op_, err := cbor.Marshal(cbor.RawTag{TagOp, []byte(op)})
-	if err != nil {
-		panic(err)
-	}
-	return op_
-}
-
 func (p *parser) parseBinary(prec float64) (cbor.RawMessage, error) {
 	left, err := p.parseUnary(prec)
 	if err != nil {
@@ -548,7 +544,7 @@ func Parse(tokens []Token) ([]byte, error) {
 		return nil, fmt.Errorf("empty input")
 	}
 
-	p := newParser(tokens)
+	p := &parser{tokens: tokens}
 	resetGensym()
 
 	flat, err := p.parseBinary(0)
