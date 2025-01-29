@@ -9,11 +9,12 @@ package smel
 
 import (
 	"fmt"
-	"math"
-	"reflect"
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/fxamacker/cbor/v2"
+	"github.com/gammazero/deque"
 )
 
 //// LEX
@@ -279,54 +280,22 @@ func Lex(input string) ([]Token, error) {
 
 //// PARSE
 
-// AST node types
-type NodeType int
+type TagType = uint64
 
 const (
-	NodeInt NodeType = iota
-	NodeFloat
-	NodeString
-	NodeBytes
-	NodeVar
-	NodeVariant
-	NodeBinOp
-	NodeFunction
-	NodeApply
-	NodeList
-	NodeRecord
-	NodeAssign
-	NodeWhere
-	NodeAccess
-	NodeAssert
-	NodeSpread
-	NodeHole
-	NodeMatchFunction
+	TagExpr TagType = iota
+	TagOp
+	TagVar
+	TagTag
 )
 
-// Object represents any AST node
-type Object struct {
-	// TODO: Consider only using BytesVal instead of IntVal, FloatVal, etc.
-	Type     NodeType
-	IntVal   int64
-	FloatVal float64
-	StrVal   string
-	BytesVal []byte
-	Name     string
-	Op       string // For binary operators
-	Left     *Object
-	Right    *Object
-	Params   []*Object
-	Fields   map[string]*Object
+type prec struct {
+	pl float64
+	pr float64
 }
 
-// Operator precedence and associativity
-type precedence struct {
-	pl float64 // Left precedence
-	pr float64 // Right precedence
-}
-
-var operatorPrecedence = map[string]precedence{
-	"":   {0, 1},   // Default/juxtaposition
+var precs = map[string]prec{
+	" ":  {0, 1},   // Default/juxtaposition
 	"=":  {2, 1},   // Assignment
 	"->": {3, 2},   // Function arrow
 	"|>": {4, 5},   // Forward pipe
@@ -380,47 +349,34 @@ func (p *parser) next() *Token {
 	return token
 }
 
-func (p *parser) parseUnary(prec float64) (*Object, error) {
+func (p *parser) parseUnary(prec float64) (cbor.RawMessage, error) {
 	token := p.next()
 	if token == nil {
 		return nil, fmt.Errorf("unexpected end of input")
 	}
 
 	switch token.Type {
-	case TokenIntLit:
-		return &Object{Type: NodeInt, IntVal: token.Value.(int64)}, nil
-
-	case TokenFloatLit:
-		return &Object{Type: NodeFloat, FloatVal: token.Value.(float64)}, nil
-
-	case TokenName:
-		return &Object{Type: NodeVar, Name: token.Value.(string)}, nil
-
-	case TokenStringLit:
-		return &Object{Type: NodeString, StrVal: token.Value.(string)}, nil
+	case TokenIntLit, TokenFloatLit, TokenName, TokenStringLit:
+		return cbor.Marshal(token.Value)
 
 	case TokenHash:
-		variant := p.next()
-		if variant == nil {
+		tag := p.next()
+		if tag == nil {
 			return nil, fmt.Errorf("unexpected end")
 		}
-		if variant.Type != TokenName {
+		if tag.Type != TokenName {
 			return nil, fmt.Errorf("expected name after #")
 		}
-		right, err := p.parseBinary(operatorPrecedence[""].pr + 1)
+		right, err := p.parseBinary(precs[" "].pr + 1)
 		if err != nil {
 			return nil, err
 		}
-		return &Object{
-			Type:  NodeVariant,
-			Name:  variant.Value.(string),
-			Right: right,
-		}, nil
+		return cbor.Marshal(cbor.Tag{TagTag, right})
 
 	case TokenLeftParen:
 		if next := p.peek(); next != nil && next.Type == TokenRightParen {
 			p.next() // consume )
-			return &Object{Type: NodeHole}, nil
+			return cbor.Marshal(nil)
 		}
 		expr, err := p.parseBinary(0)
 		if err != nil {
@@ -432,20 +388,7 @@ func (p *parser) parseUnary(prec float64) (*Object, error) {
 		return expr, nil
 
 	case TokenLeftBracket:
-		list := &Object{Type: NodeList, Params: make([]*Object, 0)}
-		if next := p.peek(); next != nil && next.Type == TokenRightBracket {
-			p.next() // consume ]
-			return list, nil
-		}
-
-		// Parse first item
-		item, err := p.parseBinary(2)
-		if err != nil {
-			return nil, err
-		}
-		list.Params = append(list.Params, item)
-
-		// Parse remaining items
+		list := make([]cbor.RawMessage, 0)
 		for {
 			next := p.next()
 			if next == nil {
@@ -461,89 +404,108 @@ func (p *parser) parseUnary(prec float64) (*Object, error) {
 			if err != nil {
 				return nil, err
 			}
-			list.Params = append(list.Params, item)
+			list = append(list, item)
 		}
-		return list, nil
+		return cbor.Marshal(list)
 
 	case TokenLeftBrace:
-		record := &Object{Type: NodeRecord, Fields: make(map[string]*Object)}
-		if next := p.peek(); next != nil && next.Type == TokenRightBrace {
-			p.next() // consume }
-			return record, nil
-		}
-
-		// Parse first field
-		field, err := p.parseAssign(2)
-		if err != nil {
-			return nil, err
-		}
-		record.Fields[field.Name] = field.Right
-
-		// Parse remaining fields
+		record := make(map[string]cbor.RawMessage)
 		for {
-			next := p.next()
-			if next == nil {
-				return nil, fmt.Errorf("expected , or }")
+			{
+				next := p.next()
+				if next == nil {
+					return nil, fmt.Errorf("expected , or }")
+				}
+				if next.Type == TokenRightBrace {
+					break
+				}
+				if next.Type != TokenOperator || next.Value != "," {
+					return nil, fmt.Errorf("expected , between record fields")
+				}
 			}
-			if next.Type == TokenRightBrace {
-				break
+			{
+				l, err := p.parseUnary(prec)
+				if err != nil {
+					return nil, err
+				}
+				var k string
+				err = cbor.Unmarshal(l, &k)
+				if err != nil {
+					return nil, err
+				}
+				// TODO: Handle spread.
+				next := p.next()
+				if next == nil {
+					return nil, fmt.Errorf("expected =")
+				}
+				if next.Type != TokenOperator || next.Value != "=" {
+					return nil, fmt.Errorf("expected = after record key")
+				}
+				r, err := p.parseUnary(prec)
+				if err != nil {
+					return nil, err
+				}
+				record[k] = r
 			}
-			if next.Type != TokenOperator || next.Value != "," {
-				return nil, fmt.Errorf("expected , between record fields")
-			}
-			field, err := p.parseAssign(2)
-			if err != nil {
-				return nil, err
-			}
-			record.Fields[field.Name] = field.Right
 		}
-		return record, nil
+		return cbor.Marshal(record)
 
 	case TokenOperator:
 		switch token.Value {
 		case "-":
-			// Unary minus
-			right, err := p.parseBinary(highestPrec + 1)
-			if err != nil {
-				return nil, err
-			}
-			// Handle constant folding
-			switch right.Type {
-			case NodeInt:
-				return &Object{Type: NodeInt, IntVal: -right.IntVal}, nil
-			case NodeFloat:
-				return &Object{Type: NodeFloat, FloatVal: -right.FloatVal}, nil
+			op := p.peek()
+			switch op.Type {
+			case TokenIntLit:
+				op.Value = -op.Value.(int)
+				return p.parseUnary(highestPrec + 1)
+
+			case TokenFloatLit:
+				op.Value = -op.Value.(float64)
+				return p.parseUnary(highestPrec + 1)
+
 			default:
-				return &Object{Type: NodeBinOp, Op: "-", Left: &Object{Type: NodeInt, IntVal: 0}, Right: right}, nil
+				right, err := p.parseUnary(highestPrec + 1)
+				// TODO: 0 - right
+				return right, err
+
 			}
 		case "...":
-			return &Object{Type: NodeSpread}, nil
+			return cbor.Marshal(cbor.Tag{TagVar, "..."})
 		}
 	}
 
 	return nil, fmt.Errorf("unexpected token %v", token)
 }
 
-func (p *parser) parseBinary(prec float64) (*Object, error) {
+func tagOp(op string) cbor.RawMessage {
+	op_, err := cbor.Marshal(cbor.RawTag{TagOp, []byte(op)})
+	if err != nil {
+		panic(err)
+	}
+	return op_
+}
+
+func (p *parser) parseBinary(prec float64) (cbor.RawMessage, error) {
 	left, err := p.parseUnary(prec)
 	if err != nil {
 		return nil, err
 	}
 
+	expr := new(deque.Deque[cbor.RawMessage])
+	expr.PushFront(left)
+	// TODO: expr.Grow(todo)
 	for {
 		op := p.peek()
 		if op == nil {
 			break
 		}
 
-		// Handle closing tokens
 		if op.Type == TokenRightParen || op.Type == TokenRightBracket || op.Type == TokenRightBrace {
 			break
 		}
 
-		// Handle juxtaposition (function application)
 		if op.Type != TokenOperator {
-			opPrec := operatorPrecedence[""]
+			opPrec := precs[" "]
 			if opPrec.pl < prec {
 				break
 			}
@@ -551,117 +513,37 @@ func (p *parser) parseBinary(prec float64) (*Object, error) {
 			if err != nil {
 				return nil, err
 			}
-			left = &Object{Type: NodeApply, Left: left, Right: right}
+			expr.PushFront(tagOp(" "))
+			expr.PushBack(right)
 			continue
 		}
 
-		// Handle operators
-		opPrec, ok := operatorPrecedence[op.Value.(string)]
+		opPrec, ok := precs[op.Value.(string)]
 		if !ok || opPrec.pl < prec {
 			break
 		}
-		p.next() // consume operator
+		p.next()
 
+		// TODO: Look for more parse errors here.
 		switch op.Value {
 		case "=":
-			if left.Type != NodeVar {
+			if TagType(left[0]) == TagVar {
 				return nil, fmt.Errorf("expected variable name before =")
 			}
-			right, err := p.parseBinary(opPrec.pr)
-			if err != nil {
-				return nil, err
-			}
-			left = &Object{Type: NodeAssign, Name: left.Name, Right: right}
-
-		case "->":
-			right, err := p.parseBinary(opPrec.pr)
-			if err != nil {
-				return nil, err
-			}
-			left = &Object{Type: NodeFunction, Left: left, Right: right}
-
-		case "|>":
-			right, err := p.parseBinary(opPrec.pr)
-			if err != nil {
-				return nil, err
-			}
-			left = &Object{Type: NodeApply, Left: right, Right: left}
-
-		case "<|":
-			right, err := p.parseBinary(opPrec.pr)
-			if err != nil {
-				return nil, err
-			}
-			left = &Object{Type: NodeApply, Left: left, Right: right}
-
-		case ">>", "<<":
-			right, err := p.parseBinary(opPrec.pr)
-			if err != nil {
-				return nil, err
-			}
-			v := gensym()
-			varNode := &Object{Type: NodeVar, Name: v}
-
-			var composed *Object
-			if op.Value == ">>" {
-				composed = &Object{Type: NodeApply, Left: right, Right: &Object{Type: NodeApply, Left: left, Right: varNode}}
-			} else {
-				composed = &Object{Type: NodeApply, Left: left, Right: &Object{Type: NodeApply, Left: right, Right: varNode}}
-			}
-
-			left = &Object{Type: NodeFunction, Left: varNode, Right: composed}
-
-		case ".":
-			right, err := p.parseBinary(opPrec.pr)
-			if err != nil {
-				return nil, err
-			}
-			left = &Object{Type: NodeWhere, Left: left, Right: right}
-
-		case "?":
-			right, err := p.parseBinary(opPrec.pr)
-			if err != nil {
-				return nil, err
-			}
-			left = &Object{Type: NodeAssert, Left: left, Right: right}
-
-		case "@":
-			right, err := p.parseBinary(opPrec.pr)
-			if err != nil {
-				return nil, err
-			}
-			left = &Object{Type: NodeAccess, Left: left, Right: right}
-
-		default:
-			right, err := p.parseBinary(opPrec.pr)
-			if err != nil {
-				return nil, err
-			}
-			left = &Object{Type: NodeBinOp, Op: op.Value.(string), Left: left, Right: right}
 		}
+
+		right, err := p.parseBinary(opPrec.pr)
+		if err != nil {
+			return nil, err
+		}
+		expr.PushFront(tagOp(op.Value.(string)))
+		expr.PushBack(right)
 	}
 
-	return left, nil
+	return cbor.Marshal(cbor.Tag{TagExpr, expr})
 }
 
-func (p *parser) parseAssign(prec float64) (*Object, error) {
-	assign, err := p.parseBinary(prec)
-	if err != nil {
-		return nil, err
-	}
-
-	if assign.Type == NodeSpread {
-		return &Object{Type: NodeAssign, Name: "...", Right: assign}, nil
-	}
-
-	if assign.Type != NodeAssign {
-		return nil, fmt.Errorf("expected assignment in record field")
-	}
-
-	return assign, nil
-}
-
-func Parse(tokens []Token) (*Object, error) {
+func Parse(tokens []Token) ([]byte, error) {
 	if len(tokens) == 0 {
 		return nil, fmt.Errorf("empty input")
 	}
@@ -669,20 +551,23 @@ func Parse(tokens []Token) (*Object, error) {
 	p := newParser(tokens)
 	resetGensym()
 
-	ast, err := p.parseBinary(0)
+	flat, err := p.parseBinary(0)
 	if err != nil {
 		return nil, err
 	}
+
+	// TODO: Consider inferring types here too as a type check.
 
 	if p.peek() != nil {
 		return nil, fmt.Errorf("unexpected tokens after expression")
 	}
 
-	return ast, nil
+	return flat, nil
 }
 
 //// EVAL
 
+/*
 type Env map[string]*Object
 
 func Match(obj, pattern *Object) (Env, error) {
@@ -1223,3 +1108,4 @@ func eval_exp(env Env, exp *Object) *Object {
 		panic(fmt.Sprintf("eval_exp not implemented for %v", exp.Type))
 	}
 }
+*/
