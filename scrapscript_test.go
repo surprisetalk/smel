@@ -1069,19 +1069,19 @@ func TestPrint(t *testing.T) {
 		// 		{"bytes_base64", "~~64'QUJD", ""},
 		// 		{"bytes_base32", "~~32'IFBEG===", ""},
 		// 		{"bytes_base16", "~~16'414243", ""},
-		{"int_addition", "1 + 2", ""},
-		{"int_subtraction", "1 - 2", ""},
-		{"string_concat", `"abc" ++ "def"`, ""},
-		{"list_cons", "1 >+ [2,3]", ""},
-		{"list_cons_nested", "1 >+ 2 >+ [3,4]", ""},
-		{"list_append", "[1,2] +< 3", ""},
-		{"list_append_nested", "[1,2] +< 3 +< 4", ""},
-		// 		{"empty_list", "[ ]", ""},
-		// 		{"empty_list_no_spaces", "[]", ""},
-		// 		{"list_of_ints", "[ 1 , 2 ]", ""},
-		// 		{"list_of_exprs", "[ 1 + 2 , 3 + 4 ]", ""},
-		// 		{"where", "a + 2 . a = 1", ""},
-		// 		{"nested_where", "a + b . a = 1 . b = 2", ""},
+		{"int_addition", "1 + 2", "1 + 2"},
+		{"int_subtraction", "1 - 2", "1 - 2"},
+		{"string_concat", `"abc" ++ "def"`, `"abc" ++ "def"`},
+		{"list_cons", "1 >+ [2,3]", "1 >+ [ 2, 3 ]"},
+		{"list_cons_nested", "1 >+ 2 >+ [3,4]", "1 >+ 2 >+ [ 3, 4 ]"},
+		{"list_append", "[1,2] +< 3", "[ 1, 2 ] +< 3"},
+		{"list_append_nested", "[1,2] +< 3 +< 4", "[ 1, 2 ] +< 3 +< 4"},
+		{"empty_list", "[ ]", "[]"},
+		{"empty_list_no_spaces", "[]", "[]"},
+		{"list_of_ints", "[ 1 , 2 ]", "[ 1, 2 ]"},
+		{"list_of_exprs", "[ 1 + 2 , 3 + 4 ]", "[ 1 + 2, 3 + 4 ]"},
+		{"where", "a + 2 . a = 1", "a + 2 . a = 1"},
+		{"nested_where", "a + b . a = 1 . b = 2", "a + b . a = 1 . b = 2"},
 		// 		{"assert", "a + 1 ? a == 1 . a = 1", ""},
 		// 		{"nested_assert", "a + b ? a == 1 ? b == 2 . a = 1 . b = 2", ""},
 		// 		{"hole", "()", ""},
@@ -1141,7 +1141,7 @@ func TestPrint(t *testing.T) {
 			}
 
 			if output != tt.expected {
-				t.Fatalf("expected: %v, received %v", output, tt.expected)
+				t.Fatalf("expected: %v but received: %v", tt.expected, output)
 			}
 		})
 	}

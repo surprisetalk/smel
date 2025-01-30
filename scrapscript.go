@@ -294,20 +294,43 @@ type prec struct {
 }
 
 var precs = map[string]prec{
-	" ":  {0, 1},   // Default/juxtaposition
-	"=":  {2, 1},   // Assignment
-	"->": {3, 2},   // Function arrow
-	"|>": {4, 5},   // Forward pipe
-	"<|": {5, 4},   // Backward pipe
-	">>": {6, 7},   // Forward compose
-	"<<": {7, 6},   // Backward compose
-	".":  {8, 9},   // Where
-	"?":  {10, 11}, // Assert
-	"@":  {12, 13}, // Access
-	"+":  {20, 21}, // Add
-	"-":  {20, 21}, // Subtract
-	"*":  {30, 31}, // Multiply
-	"/":  {30, 31}, // Divide
+	" ":   {0, 1},
+	"=":   {2, 1},
+	"->":  {3, 2},
+	"|>":  {4, 5},
+	"<|":  {5, 4},
+	">>":  {6, 7},
+	"<<":  {7, 6},
+	".":   {8, 9},
+	"?":   {10, 11},
+	"@":   {12, 13},
+	"+":   {20, 21},
+	"-":   {20, 21},
+	"*":   {30, 31},
+	"/":   {30, 31},
+	"::":  {2000, 1999},
+	"":    {999, 1000},
+	"^":   {12, 13},
+	"//":  {12, 11},
+	"%":   {12, 11},
+	">*":  {9, 10},
+	"++":  {9, 10},
+	">+":  {10, 9},
+	"+<":  {9, 10},
+	"==":  {9, 9},
+	"/=":  {9, 9},
+	"<":   {9, 9},
+	">":   {9, 9},
+	"<=":  {9, 9},
+	">=":  {9, 9},
+	"&&":  {7, 8},
+	"||":  {6, 7},
+	"#":   {5, 4},
+	"|":   {3, 4},
+	":":   {4, 3},
+	"!":   {3, 2},
+	",":   {1, 1},
+	"...": {0, 0},
 }
 
 const highestPrec = 100.0
@@ -339,20 +362,20 @@ func (p *parser) next() *Token {
 	if p.pos >= len(p.Tokens) {
 		return nil
 	}
-	Token := &p.Tokens[p.pos]
+	token := &p.Tokens[p.pos]
 	p.pos++
-	return Token
+	return token
 }
 
 func (p *parser) parseUnary(prec float64) (Flat, error) {
-	Token := p.next()
-	if Token == nil {
+	token := p.next()
+	if token == nil {
 		return nil, fmt.Errorf("unexpected end of input")
 	}
 
-	switch Token.Type {
+	switch token.Type {
 	case TokenIntLit, TokenFloatLit, TokenName, TokenStringLit, TokenBytesLit:
-		return cbor.Marshal(Token.Value)
+		return cbor.Marshal(token.Value)
 
 	case TokenHash:
 		tag := p.next()
@@ -385,21 +408,30 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 	case TokenLeftBracket:
 		list := make([]Flat, 0)
 		for {
-			next := p.next()
-			if next == nil {
-				return nil, fmt.Errorf("expected , or ]")
+			{
+				next := p.peek()
+				if next == nil {
+					return nil, fmt.Errorf("unfinished list")
+				}
+				if next.Type == TokenRightBracket {
+					p.next()
+					break
+				}
+				item, err := p.parseBinary(precs[","].pr + 1)
+				if err != nil {
+					return nil, err
+				}
+				list = append(list, item)
 			}
-			if next.Type == TokenRightBracket {
-				break
+			{
+				next := p.next()
+				if next.Type == TokenRightBracket {
+					break
+				}
+				if next.Type != TokenOperator || next.Value != "," {
+					return nil, fmt.Errorf("expected , between list items but received: %v", next.Value)
+				}
 			}
-			if next.Type != TokenOperator || next.Value != "," {
-				return nil, fmt.Errorf("expected , between list items")
-			}
-			item, err := p.parseBinary(2)
-			if err != nil {
-				return nil, err
-			}
-			list = append(list, item)
 		}
 		return cbor.Marshal(list)
 
@@ -446,7 +478,7 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 		return cbor.Marshal(record)
 
 	case TokenOperator:
-		switch Token.Value {
+		switch token.Value {
 		case "-":
 			op := p.peek()
 			switch op.Type {
@@ -467,10 +499,9 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 		case "...":
 			return cbor.Marshal(cbor.Tag{TagVar, "..."})
 		}
-
 	}
 
-	return nil, fmt.Errorf("unexpected Token %v", Token)
+	return nil, fmt.Errorf("unexpected Token %v", token)
 }
 
 func (p *parser) parseBinary(prec float64) (Flat, error) {
@@ -546,7 +577,7 @@ func Parse(Tokens []Token) (Flat, error) {
 	// TODO: Consider inferring types here too as a type check.
 
 	if p.peek() != nil {
-		return nil, fmt.Errorf("unexpected Tokens after expression")
+		return nil, fmt.Errorf("unexpected Tokens after expression: %v", p.peek())
 	}
 
 	return flat, nil
@@ -554,13 +585,7 @@ func Parse(Tokens []Token) (Flat, error) {
 
 //// PRINT
 
-func Print(flat Flat) (string, error) {
-	var v interface{}
-	err := cbor.Unmarshal(flat, &v)
-	if err != nil {
-		return "", err
-	}
-
+func print(v interface{}) (string, error) {
 	if v == nil {
 		return "()", nil
 	}
@@ -580,15 +605,15 @@ func Print(flat Flat) (string, error) {
 		return fmt.Sprintf("~~%v", base64.StdEncoding.EncodeToString(x)), nil
 	}
 	if x, ok := (v).(string); ok {
-		return fmt.Sprintf("%v", x), nil
+		return fmt.Sprintf(`"%v"`, x), nil
 	}
-	if xs, ok := (v).([]Flat); ok {
+	if xs, ok := (v).([]interface{}); ok {
 		if len(xs) == 0 {
 			return "[]", nil
 		}
 		xs_ := []string{}
 		for _, x := range xs {
-			x_, err := Print(x)
+			x_, err := print(x)
 			if err != nil {
 				return "", err
 			}
@@ -596,13 +621,13 @@ func Print(flat Flat) (string, error) {
 		}
 		return fmt.Sprintf("[ %v ]", strings.Join(xs_, ", ")), nil
 	}
-	if xs, ok := (v).(map[string]Flat); ok {
+	if xs, ok := (v).(map[string]interface{}); ok {
 		if len(xs) == 0 {
 			return "{}", nil
 		}
 		xs_ := []string{}
 		for k, x := range xs {
-			x_, err := Print(x)
+			x_, err := print(x)
 			if err != nil {
 				return "", err
 			}
@@ -619,21 +644,21 @@ func Print(flat Flat) (string, error) {
 			if xs, ok := x.Content.([]interface{}); ok {
 				s := []string{}
 				for _, x := range xs {
-					x_, err := Print(x) // TODO:
-					if err != nil {
-						return "", err
-					}
-					if x__, ok := x.([]byte); ok && uint64(x__[0]) == TagOp {
+					if x_, ok := x.(cbor.Tag); ok && x_.Number == TagOp {
 						l := len(s)
-						s = append(s[:l-2], fmt.Sprintf("%v %v %v", s[l-2], x_, s[l-1]))
+						s = append(s[:l-2], fmt.Sprintf("%v %v %v", s[l-2], x_.Content, s[l-1]))
 					} else {
+						x_, err := print(x)
+						if err != nil {
+							return "", err
+						}
 						s = append(s, x_)
 					}
 				}
 				if len(s) != 1 {
-					return "", fmt.Errorf("unbalanced expression")
+					return "", fmt.Errorf("unbalanced expression: %v", s)
 				}
-				return s[1], nil
+				return s[0], nil
 			}
 			return "", fmt.Errorf("expected list of flats: %v", x.Content)
 		case TagOp:
@@ -656,6 +681,15 @@ func Print(flat Flat) (string, error) {
 	}
 
 	return "", fmt.Errorf("unrecognized flat %v", v)
+}
+
+func Print(flat Flat) (string, error) {
+	var v interface{}
+	err := cbor.Unmarshal(flat, &v)
+	if err != nil {
+		return "", err
+	}
+	return print(v)
 }
 
 //// EVAL
