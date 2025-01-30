@@ -8,13 +8,13 @@
 package smel
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/fxamacker/cbor/v2"
-	"github.com/gammazero/deque" // TODO: Remove this dependency.
 )
 
 //// FLAT
@@ -32,7 +32,8 @@ const (
 )
 
 func tagOp(op string) Flat {
-	op_, err := cbor.Marshal(cbor.RawTag{TagOp, []byte(op)})
+	// TODO: Do NOT store this as a string! So inefficient.
+	op_, err := cbor.Marshal(cbor.Tag{TagOp, op})
 	if err != nil {
 		panic(err)
 	}
@@ -41,27 +42,27 @@ func tagOp(op string) Flat {
 
 //// LEX
 
-type tokenType int
+type TokenType int
 
 const (
-	tokenEOF tokenType = iota
-	tokenHash
-	tokenLeftParen
-	tokenRightParen
-	tokenLeftBrace
-	tokenRightBrace
-	tokenLeftBracket
-	tokenRightBracket
-	tokenOperator
-	tokenName
-	tokenStringLit
-	tokenIntLit
-	tokenFloatLit
-	tokenBytesLit
+	TokenEOF TokenType = iota
+	TokenHash
+	TokenLeftParen
+	TokenRightParen
+	TokenLeftBrace
+	TokenRightBrace
+	TokenLeftBracket
+	TokenRightBracket
+	TokenOperator
+	TokenName
+	TokenStringLit
+	TokenIntLit
+	TokenFloatLit
+	TokenBytesLit
 )
 
-type token struct {
-	Type  tokenType
+type Token struct {
+	Type  TokenType
 	Value interface{}
 }
 
@@ -94,7 +95,7 @@ func (l *lexer) readWhile(pred func(byte) bool) string {
 	return result.String()
 }
 
-func (l *lexer) readOperator() (token, error) {
+func (l *lexer) readOperator() (Token, error) {
 	ops := map[string]bool{
 		"+": true, "-": true, "*": true, "/": true, "^": true, "%": true,
 		"++": true, "+<": true, ">+": true,
@@ -117,58 +118,43 @@ func (l *lexer) readOperator() (token, error) {
 				if ops[op3] {
 					l.advance()
 					l.advance()
-					return token{Type: tokenOperator, Value: op3}, nil
+					return Token{Type: TokenOperator, Value: op3}, nil
 				}
 			}
 			op2 := "" + string(c1) + string(c2)
 			if ops[op2] {
 				l.advance()
-				return token{Type: tokenOperator, Value: op2}, nil
+				return Token{Type: TokenOperator, Value: op2}, nil
 			}
 		}
 		op1 := string(c1)
 		if ops[op1] {
-			return token{Type: tokenOperator, Value: op1}, nil
+			return Token{Type: TokenOperator, Value: op1}, nil
 		}
 	}
-	return token{}, fmt.Errorf("invalid operator: %s", string(c1))
+	return Token{}, fmt.Errorf("invalid operator: %s", string(c1))
 }
 
-func (l *lexer) readBytes() (token, error) {
+func (l *lexer) readBytes() (Token, error) {
 	l.advance() // skip second ~
 	var str strings.Builder
-	base := int64(64) // default base
-
 	str.WriteString(l.readWhile(func(c byte) bool {
 		return !unicode.IsSpace(rune(c))
 	}))
-
-	parts := strings.Split(str.String(), "'")
-	if len(parts) > 1 {
-		var err error
-		base, err = strconv.ParseInt(parts[0], 10, 64)
-		if err != nil {
-			return token{}, fmt.Errorf("invalid base in bytes literal: %s", parts[0])
-		}
-		return token{Type: tokenBytesLit, Value: struct {
-			Base  int64
-			Value string
-		}{base, parts[1]}}, nil
+	data, err := base64.StdEncoding.DecodeString(str.String())
+	if err != nil {
+		return Token{}, fmt.Errorf("base64 problem: %v", err)
 	}
-
-	return token{Type: tokenBytesLit, Value: struct {
-		Base  int64
-		Value string
-	}{base, str.String()}}, nil
+	return Token{TokenBytesLit, data}, nil
 }
 
-func (l *lexer) nexttoken() (token, error) {
+func (l *lexer) nextToken() (Token, error) {
 	l.readWhile(func(c byte) bool {
 		return c == ' ' || c == '\t' || c == '\n' || c == '\r'
 	})
 
 	if !l.hasInput() {
-		return token{Type: tokenEOF}, nil
+		return Token{Type: TokenEOF}, nil
 	}
 
 	c := l.peek()
@@ -188,7 +174,7 @@ func (l *lexer) nexttoken() (token, error) {
 					'r': '\r',
 				}
 				if _, ok := custom[l.peek()]; !ok {
-					return token{}, fmt.Errorf("TODO")
+					return Token{}, fmt.Errorf("TODO")
 				}
 				str.WriteByte(custom[l.peek()])
 				l.advance()
@@ -199,10 +185,10 @@ func (l *lexer) nexttoken() (token, error) {
 		}
 
 		if !l.hasInput() {
-			return token{}, fmt.Errorf("unterminated string")
+			return Token{}, fmt.Errorf("unterminated string")
 		}
 		l.advance() // skip closing quote
-		return token{Type: tokenStringLit, Value: str.String()}, nil
+		return Token{Type: TokenStringLit, Value: str.String()}, nil
 	case c >= '0' && c <= '9':
 		var num strings.Builder
 		isFloat := false
@@ -211,7 +197,7 @@ func (l *lexer) nexttoken() (token, error) {
 			c := l.peek()
 			if c == '.' {
 				if isFloat {
-					return token{}, fmt.Errorf("unexpected character '.'")
+					return Token{}, fmt.Errorf("unexpected character '.'")
 				}
 				isFloat = true
 				num.WriteByte(c)
@@ -228,26 +214,26 @@ func (l *lexer) nexttoken() (token, error) {
 		if isFloat {
 			val, err := strconv.ParseFloat(str, 64)
 			if err != nil {
-				return token{}, err
+				return Token{}, err
 			}
-			return token{Type: tokenFloatLit, Value: val}, nil
+			return Token{Type: TokenFloatLit, Value: val}, nil
 		}
 
 		val, err := strconv.ParseInt(str, 10, 64)
 		if err != nil {
-			return token{}, err
+			return Token{}, err
 		}
-		return token{Type: tokenIntLit, Value: val}, nil
+		return Token{Type: TokenIntLit, Value: val}, nil
 
 	case c == '#':
 		l.advance()
-		return token{Type: tokenHash, Value: "#"}, nil
+		return Token{Type: TokenHash, Value: "#"}, nil
 	case c == '~':
 		l.advance()
 		if l.hasInput() && l.peek() == '~' {
 			return l.readBytes()
 		}
-		return token{}, fmt.Errorf("unexpected character '~'")
+		return Token{}, fmt.Errorf("unexpected character '~'")
 	case c == '-':
 		if l.pos+1 < len(l.text) && l.text[l.pos+1] == '-' {
 			// Skip comment until newline
@@ -256,48 +242,48 @@ func (l *lexer) nexttoken() (token, error) {
 			for l.hasInput() && l.peek() != '\n' {
 				l.advance()
 			}
-			return l.nexttoken()
+			return l.nextToken()
 		}
 		return l.readOperator()
 	case strings.ContainsRune("()[]{}", rune(c)):
 		l.advance()
-		custom := map[byte]tokenType{
-			'(': tokenLeftParen,
-			')': tokenRightParen,
-			'{': tokenLeftBrace,
-			'}': tokenRightBrace,
-			'[': tokenLeftBracket,
-			']': tokenRightBracket,
+		custom := map[byte]TokenType{
+			'(': TokenLeftParen,
+			')': TokenRightParen,
+			'{': TokenLeftBrace,
+			'}': TokenRightBrace,
+			'[': TokenLeftBracket,
+			']': TokenRightBracket,
 		}
-		return token{Type: custom[c], Value: string(c)}, nil
+		return Token{Type: custom[c], Value: string(c)}, nil
 	case strings.ContainsRune("+-*/<>=!&|.,:|?@^%", rune(c)):
 		return l.readOperator()
 	case unicode.IsLetter(rune(c)) || c == '$' || c == '_':
 		id := l.readWhile(func(c byte) bool {
 			return unicode.IsLetter(rune(c)) || unicode.IsDigit(rune(c)) || c == '$' || c == '\'' || c == '_'
 		})
-		return token{Type: tokenName, Value: id}, nil
+		return Token{Type: TokenName, Value: id}, nil
 	}
 
-	return token{}, fmt.Errorf("unexpected character: %c", c)
+	return Token{}, fmt.Errorf("unexpected character: %c", c)
 }
 
-func Lex(input string) ([]token, error) {
+func Lex(input string) ([]Token, error) {
 	l := &lexer{text: input}
-	var tokens []token
+	var Tokens []Token
 
 	for {
-		token, err := l.nexttoken()
+		Token, err := l.nextToken()
 		if err != nil {
 			return nil, err
 		}
-		if token.Type == tokenEOF {
+		if Token.Type == TokenEOF {
 			break
 		}
-		tokens = append(tokens, token)
+		Tokens = append(Tokens, Token)
 	}
 
-	return tokens, nil
+	return Tokens, nil
 }
 
 //// PARSE
@@ -338,42 +324,42 @@ func resetGensym() {
 }
 
 type parser struct {
-	tokens []token
+	Tokens []Token
 	pos    int
 }
 
-func (p *parser) peek() *token {
-	if p.pos >= len(p.tokens) {
+func (p *parser) peek() *Token {
+	if p.pos >= len(p.Tokens) {
 		return nil
 	}
-	return &p.tokens[p.pos]
+	return &p.Tokens[p.pos]
 }
 
-func (p *parser) next() *token {
-	if p.pos >= len(p.tokens) {
+func (p *parser) next() *Token {
+	if p.pos >= len(p.Tokens) {
 		return nil
 	}
-	token := &p.tokens[p.pos]
+	Token := &p.Tokens[p.pos]
 	p.pos++
-	return token
+	return Token
 }
 
 func (p *parser) parseUnary(prec float64) (Flat, error) {
-	token := p.next()
-	if token == nil {
+	Token := p.next()
+	if Token == nil {
 		return nil, fmt.Errorf("unexpected end of input")
 	}
 
-	switch token.Type {
-	case tokenIntLit, tokenFloatLit, tokenName, tokenStringLit:
-		return cbor.Marshal(token.Value)
+	switch Token.Type {
+	case TokenIntLit, TokenFloatLit, TokenName, TokenStringLit, TokenBytesLit:
+		return cbor.Marshal(Token.Value)
 
-	case tokenHash:
+	case TokenHash:
 		tag := p.next()
 		if tag == nil {
 			return nil, fmt.Errorf("unexpected end")
 		}
-		if tag.Type != tokenName {
+		if tag.Type != TokenName {
 			return nil, fmt.Errorf("expected name after #")
 		}
 		right, err := p.parseBinary(precs[" "].pr + 1)
@@ -382,8 +368,8 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 		}
 		return cbor.Marshal(cbor.Tag{TagTag, right})
 
-	case tokenLeftParen:
-		if next := p.peek(); next != nil && next.Type == tokenRightParen {
+	case TokenLeftParen:
+		if next := p.peek(); next != nil && next.Type == TokenRightParen {
 			p.next() // consume )
 			return cbor.Marshal(nil)
 		}
@@ -391,22 +377,22 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 		if err != nil {
 			return nil, err
 		}
-		if next := p.next(); next == nil || next.Type != tokenRightParen {
+		if next := p.next(); next == nil || next.Type != TokenRightParen {
 			return nil, fmt.Errorf("expected )")
 		}
 		return expr, nil
 
-	case tokenLeftBracket:
+	case TokenLeftBracket:
 		list := make([]Flat, 0)
 		for {
 			next := p.next()
 			if next == nil {
 				return nil, fmt.Errorf("expected , or ]")
 			}
-			if next.Type == tokenRightBracket {
+			if next.Type == TokenRightBracket {
 				break
 			}
-			if next.Type != tokenOperator || next.Value != "," {
+			if next.Type != TokenOperator || next.Value != "," {
 				return nil, fmt.Errorf("expected , between list items")
 			}
 			item, err := p.parseBinary(2)
@@ -417,7 +403,7 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 		}
 		return cbor.Marshal(list)
 
-	case tokenLeftBrace:
+	case TokenLeftBrace:
 		record := make(map[string]Flat)
 		for {
 			{
@@ -425,10 +411,10 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 				if next == nil {
 					return nil, fmt.Errorf("expected , or }")
 				}
-				if next.Type == tokenRightBrace {
+				if next.Type == TokenRightBrace {
 					break
 				}
-				if next.Type != tokenOperator || next.Value != "," {
+				if next.Type != TokenOperator || next.Value != "," {
 					return nil, fmt.Errorf("expected , between record fields")
 				}
 			}
@@ -447,7 +433,7 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 				if next == nil {
 					return nil, fmt.Errorf("expected =")
 				}
-				if next.Type != tokenOperator || next.Value != "=" {
+				if next.Type != TokenOperator || next.Value != "=" {
 					return nil, fmt.Errorf("expected = after record key")
 				}
 				r, err := p.parseUnary(prec)
@@ -459,16 +445,16 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 		}
 		return cbor.Marshal(record)
 
-	case tokenOperator:
-		switch token.Value {
+	case TokenOperator:
+		switch Token.Value {
 		case "-":
 			op := p.peek()
 			switch op.Type {
-			case tokenIntLit:
+			case TokenIntLit:
 				op.Value = -op.Value.(int)
 				return p.parseUnary(highestPrec + 1)
 
-			case tokenFloatLit:
+			case TokenFloatLit:
 				op.Value = -op.Value.(float64)
 				return p.parseUnary(highestPrec + 1)
 
@@ -481,9 +467,10 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 		case "...":
 			return cbor.Marshal(cbor.Tag{TagVar, "..."})
 		}
+
 	}
 
-	return nil, fmt.Errorf("unexpected token %v", token)
+	return nil, fmt.Errorf("unexpected Token %v", Token)
 }
 
 func (p *parser) parseBinary(prec float64) (Flat, error) {
@@ -491,21 +478,22 @@ func (p *parser) parseBinary(prec float64) (Flat, error) {
 	if err != nil {
 		return nil, err
 	}
+	if p.peek() == nil {
+		return left, nil
+	}
 
-	expr := new(deque.Deque[Flat])
-	expr.PushFront(left)
-	// TODO: expr.Grow(todo)
+	expr := []Flat{left}
 	for {
 		op := p.peek()
 		if op == nil {
 			break
 		}
 
-		if op.Type == tokenRightParen || op.Type == tokenRightBracket || op.Type == tokenRightBrace {
+		if op.Type == TokenRightParen || op.Type == TokenRightBracket || op.Type == TokenRightBrace {
 			break
 		}
 
-		if op.Type != tokenOperator {
+		if op.Type != TokenOperator {
 			opPrec := precs[" "]
 			if opPrec.pl < prec {
 				break
@@ -514,8 +502,7 @@ func (p *parser) parseBinary(prec float64) (Flat, error) {
 			if err != nil {
 				return nil, err
 			}
-			expr.PushFront(tagOp(" "))
-			expr.PushBack(right)
+			expr = append(expr, right, tagOp(" "))
 			continue
 		}
 
@@ -537,19 +524,18 @@ func (p *parser) parseBinary(prec float64) (Flat, error) {
 		if err != nil {
 			return nil, err
 		}
-		expr.PushFront(tagOp(op.Value.(string)))
-		expr.PushBack(right)
+		expr = append(expr, right, tagOp(op.Value.(string)))
 	}
 
 	return cbor.Marshal(cbor.Tag{TagExpr, expr})
 }
 
-func Parse(tokens []token) (Flat, error) {
-	if len(tokens) == 0 {
+func Parse(Tokens []Token) (Flat, error) {
+	if len(Tokens) == 0 {
 		return nil, fmt.Errorf("empty input")
 	}
 
-	p := &parser{tokens: tokens}
+	p := &parser{Tokens: Tokens}
 	resetGensym()
 
 	flat, err := p.parseBinary(0)
@@ -560,7 +546,7 @@ func Parse(tokens []token) (Flat, error) {
 	// TODO: Consider inferring types here too as a type check.
 
 	if p.peek() != nil {
-		return nil, fmt.Errorf("unexpected tokens after expression")
+		return nil, fmt.Errorf("unexpected Tokens after expression")
 	}
 
 	return flat, nil
@@ -570,30 +556,33 @@ func Parse(tokens []token) (Flat, error) {
 
 func Print(flat Flat) (string, error) {
 	var v interface{}
-	err := cbor.Unmarshal(flat, v)
+	err := cbor.Unmarshal(flat, &v)
 	if err != nil {
 		return "", err
 	}
 
-	if x, ok := v.(*interface{}); ok && x == nil {
+	if v == nil {
 		return "()", nil
 	}
-	if x, ok := v.(bool); ok {
+	if x, ok := (v).(bool); ok {
 		return fmt.Sprintf("%v", x), nil
 	}
-	if x, ok := v.(int); ok {
+	if x, ok := (v).(uint64); ok {
 		return fmt.Sprintf("%v", x), nil
 	}
-	if x, ok := v.(float64); ok {
+	if x, ok := (v).(int64); ok {
 		return fmt.Sprintf("%v", x), nil
 	}
-	if x, ok := v.([]byte); ok {
-		return fmt.Sprintf("~~%x", x), nil
-	}
-	if x, ok := v.(string); ok {
+	if x, ok := (v).(float64); ok {
 		return fmt.Sprintf("%v", x), nil
 	}
-	if xs, ok := v.([]Flat); ok {
+	if x, ok := (v).([]byte); ok {
+		return fmt.Sprintf("~~%v", base64.StdEncoding.EncodeToString(x)), nil
+	}
+	if x, ok := (v).(string); ok {
+		return fmt.Sprintf("%v", x), nil
+	}
+	if xs, ok := (v).([]Flat); ok {
 		if len(xs) == 0 {
 			return "[]", nil
 		}
@@ -607,7 +596,7 @@ func Print(flat Flat) (string, error) {
 		}
 		return fmt.Sprintf("[ %v ]", strings.Join(xs_, ", ")), nil
 	}
-	if xs, ok := v.(map[string]Flat); ok {
+	if xs, ok := (v).(map[string]Flat); ok {
 		if len(xs) == 0 {
 			return "{}", nil
 		}
@@ -621,20 +610,20 @@ func Print(flat Flat) (string, error) {
 		}
 		return fmt.Sprintf("{ %v }", strings.Join(xs_, ", ")), nil
 	}
-	if _, ok := v.(map[interface{}]interface{}); ok {
+	if _, ok := (v).(map[interface{}]interface{}); ok {
 		return "", fmt.Errorf("unsupported record")
 	}
-	if x, ok := v.(cbor.Tag); ok {
+	if x, ok := (v).(cbor.Tag); ok {
 		switch x.Number {
 		case TagExpr:
-			if xs, ok := x.Content.([]Flat); ok {
+			if xs, ok := x.Content.([]interface{}); ok {
 				s := []string{}
 				for _, x := range xs {
-					x_, err := Print(x)
+					x_, err := Print(x) // TODO:
 					if err != nil {
 						return "", err
 					}
-					if uint64(x[0]) == TagOp {
+					if x__, ok := x.([]byte); ok && uint64(x__[0]) == TagOp {
 						l := len(s)
 						s = append(s[:l-2], fmt.Sprintf("%v %v %v", s[l-2], x_, s[l-1]))
 					} else {
@@ -646,7 +635,7 @@ func Print(flat Flat) (string, error) {
 				}
 				return s[1], nil
 			}
-			return "", fmt.Errorf("expected list of flats")
+			return "", fmt.Errorf("expected list of flats: %v", x.Content)
 		case TagOp:
 			if s, ok := x.Content.(string); ok {
 				return s, nil
@@ -663,10 +652,10 @@ func Print(flat Flat) (string, error) {
 			}
 			return "", fmt.Errorf("non-string tag")
 		}
-		return "", fmt.Errorf("unsupported tag")
+		return "", fmt.Errorf("unsupported cbor tag %v", x.Number)
 	}
 
-	return "", fmt.Errorf("unrecognized flat")
+	return "", fmt.Errorf("unrecognized flat %v", v)
 }
 
 //// EVAL
