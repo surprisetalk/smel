@@ -601,7 +601,7 @@ func Print(flat Flat) (string, error) {
 		for _, x := range xs {
 			x_, err := Print(x)
 			if err != nil {
-				return "", nil
+				return "", err
 			}
 			xs_ = append(xs_, x_)
 		}
@@ -615,7 +615,7 @@ func Print(flat Flat) (string, error) {
 		for k, x := range xs {
 			x_, err := Print(x)
 			if err != nil {
-				return "", nil
+				return "", err
 			}
 			xs_ = append(xs_, fmt.Sprintf("%v = %v", k, x_))
 		}
@@ -628,12 +628,30 @@ func Print(flat Flat) (string, error) {
 		switch x.Number {
 		case TagExpr:
 			if xs, ok := x.Content.([]Flat); ok {
-				// TODO: Implement this.
-				panic("TODO")
+				s := []string{}
+				for _, x := range xs {
+					x_, err := Print(x)
+					if err != nil {
+						return "", err
+					}
+					if uint64(x[0]) == TagOp {
+						l := len(s)
+						s = append(s[:l-2], fmt.Sprintf("%v %v %v", s[l-2], x_, s[l-1]))
+					} else {
+						s = append(s, x_)
+					}
+				}
+				if len(s) != 1 {
+					return "", fmt.Errorf("unbalanced expression")
+				}
+				return s[1], nil
 			}
 			return "", fmt.Errorf("expected list of flats")
 		case TagOp:
-			return "", fmt.Errorf("operator must be in expression")
+			if s, ok := x.Content.(string); ok {
+				return s, nil
+			}
+			return "", fmt.Errorf("non-string operator")
 		case TagVar:
 			if s, ok := x.Content.(string); ok {
 				return s, nil
