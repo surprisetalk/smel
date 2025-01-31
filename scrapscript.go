@@ -366,6 +366,20 @@ func (p *parser) next() *Token {
 	return token
 }
 
+func value(flat Flat, err error) ([]Flat, error) {
+	return []Flat{flat}, err
+}
+
+func expr(flats []Flat) (Flat, error) {
+	l := len(flats)
+	if l == 0 {
+		return nil, fmt.Errorf("empty expression")
+	} else if l == 1 {
+		return flats[0], nil
+	}
+	return cbor.Marshal(cbor.Tag{TagExpr, flats})
+}
+
 func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 	token := p.next()
 	if token == nil {
@@ -568,20 +582,6 @@ func (p *parser) parseBinary(prec float64) ([]Flat, error) {
 	}
 
 	return expr, nil
-}
-
-func value(flat Flat, err error) ([]Flat, error) {
-	return []Flat{flat}, err
-}
-
-func expr(flats []Flat) (Flat, error) {
-	l := len(flats)
-	if l == 0 {
-		return nil, fmt.Errorf("empty expression")
-	} else if l == 1 {
-		return flats[0], nil
-	}
-	return cbor.Marshal(cbor.Tag{TagExpr, flats})
 }
 
 func Parse(Tokens []Token) (Flat, error) {
