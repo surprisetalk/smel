@@ -296,7 +296,7 @@ type prec struct {
 
 var precs = map[string]prec{
 	"::": {2000, 1999.9},
-	"@":  {1001, 1001.1},
+	"@":  {1002, 1002.1},
 	" ":  {1000, 1000.1},
 	">>": {14, 13.9},
 	"<<": {14, 13.9},
@@ -366,7 +366,7 @@ func (p *parser) next() *Token {
 	return token
 }
 
-func (p *parser) parseUnary(prec float64) (Flat, error) {
+func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 	token := p.next()
 	if token == nil {
 		return nil, fmt.Errorf("unexpected end of input")
@@ -374,10 +374,10 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 
 	switch token.Type {
 	case TokenIntLit, TokenFloatLit, TokenStringLit, TokenBytesLit:
-		return cbor.Marshal(token.Value)
+		return value(cbor.Marshal(token.Value))
 
 	case TokenName:
-		return cbor.Marshal(cbor.Tag{TagVar, token.Value})
+		return value(cbor.Marshal(cbor.Tag{TagVar, token.Value}))
 
 	case TokenHash:
 		tag := p.next()
@@ -387,16 +387,12 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 		if tag.Type != TokenName {
 			return nil, fmt.Errorf("expected name after #")
 		}
-		right, err := p.parseBinary(precs[" "].pr + 1)
-		if err != nil {
-			return nil, err
-		}
-		return cbor.Marshal(cbor.Tag{TagTag, right})
+		return value(cbor.Marshal(cbor.Tag{TagTag, tag.Value}))
 
 	case TokenLeftParen:
 		if next := p.peek(); next != nil && next.Type == TokenRightParen {
 			p.next() // consume )
-			return cbor.Marshal(nil)
+			return value(cbor.Marshal(nil))
 		}
 		expr, err := p.parseBinary(0)
 		if err != nil {
@@ -423,7 +419,11 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 				if err != nil {
 					return nil, err
 				}
-				list = append(list, item)
+				item_, err := expr(item)
+				if err != nil {
+					return nil, err
+				}
+				list = append(list, item_)
 			}
 			{
 				next := p.next()
@@ -435,7 +435,7 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 				}
 			}
 		}
-		return cbor.Marshal(list)
+		return value(cbor.Marshal(list))
 
 	case TokenLeftBrace:
 		record := make(map[string]Flat)
@@ -457,8 +457,11 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 				if err != nil {
 					return nil, err
 				}
+				if len(l) != 1 {
+					return nil, fmt.Errorf("bad record")
+				}
 				var k string
-				err = cbor.Unmarshal(l, &k)
+				err = cbor.Unmarshal(l[0], &k)
 				if err != nil {
 					return nil, err
 				}
@@ -470,14 +473,18 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 				if next.Type != TokenOperator || next.Value != "=" {
 					return nil, fmt.Errorf("expected = after record key")
 				}
-				r, err := p.parseUnary(prec)
+				r, err := p.parseBinary(precs[","].pr + 1)
 				if err != nil {
 					return nil, err
 				}
-				record[k] = r
+				r_, err := expr(r)
+				if err != nil {
+					return nil, err
+				}
+				record[k] = r_
 			}
 		}
-		return cbor.Marshal(record)
+		return value(cbor.Marshal(record))
 
 	case TokenOperator:
 		switch token.Value {
@@ -499,14 +506,14 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 
 			}
 		case "...":
-			return cbor.Marshal(cbor.Tag{TagVar, "..."})
+			return value(cbor.Marshal(cbor.Tag{TagVar, "..."}))
 		}
 	}
 
 	return nil, fmt.Errorf("unexpected Token %v", token)
 }
 
-func (p *parser) parseBinary(prec float64) (Flat, error) {
+func (p *parser) parseBinary(prec float64) ([]Flat, error) {
 	left, err := p.parseUnary(prec)
 	if err != nil {
 		return nil, err
@@ -515,7 +522,7 @@ func (p *parser) parseBinary(prec float64) (Flat, error) {
 		return left, nil
 	}
 
-	expr := []Flat{left}
+	expr := left
 	for {
 		op := p.peek()
 		if op == nil {
@@ -535,7 +542,7 @@ func (p *parser) parseBinary(prec float64) (Flat, error) {
 			if err != nil {
 				return nil, err
 			}
-			expr = append(expr, right, tagOp(" "))
+			expr = append(expr, append(right, tagOp(" "))...)
 			continue
 		}
 
@@ -548,7 +555,7 @@ func (p *parser) parseBinary(prec float64) (Flat, error) {
 		// TODO: Look for more parse errors here.
 		switch op.Value {
 		case "=":
-			if TagType(left[0]) == TagVar {
+			if TagType(left[0][0]) == TagVar {
 				return nil, fmt.Errorf("expected variable name before =")
 			}
 		}
@@ -557,10 +564,24 @@ func (p *parser) parseBinary(prec float64) (Flat, error) {
 		if err != nil {
 			return nil, err
 		}
-		expr = append(expr, right, tagOp(op.Value.(string)))
+		expr = append(expr, append(right, tagOp(op.Value.(string)))...)
 	}
 
-	return cbor.Marshal(cbor.Tag{TagExpr, expr})
+	return expr, nil
+}
+
+func value(flat Flat, err error) ([]Flat, error) {
+	return []Flat{flat}, err
+}
+
+func expr(flats []Flat) (Flat, error) {
+	l := len(flats)
+	if l == 0 {
+		return nil, fmt.Errorf("empty expression")
+	} else if l == 1 {
+		return flats[0], nil
+	}
+	return cbor.Marshal(cbor.Tag{TagExpr, flats})
 }
 
 func Parse(Tokens []Token) (Flat, error) {
@@ -582,7 +603,7 @@ func Parse(Tokens []Token) (Flat, error) {
 		return nil, fmt.Errorf("unexpected Tokens after expression: %v", p.peek())
 	}
 
-	return flat, nil
+	return expr(flat)
 }
 
 //// PRINT
@@ -644,36 +665,65 @@ func print(v interface{}) (string, error) {
 		switch x.Number {
 		case TagExpr:
 			if xs, ok := x.Content.([]interface{}); ok {
-				pp := prec{0, 0}
-				s := []string{}
+				s := []struct {
+					text string
+					prec prec
+				}{}
+
 				for _, x := range xs {
 					if x_, ok := x.(cbor.Tag); ok && x_.Number == TagOp {
-						l := len(s)
+						if len(s) < 2 {
+							return "", fmt.Errorf("insufficient operands for operator")
+						}
+
 						op := x_.Content.(string)
-						pp_, ok := precs[op]
+						pp, ok := precs[op]
 						if !ok {
-							return "", fmt.Errorf("unrecognized operator precendence: %v", op)
+							return "", fmt.Errorf("unrecognized operator: %v", op)
 						}
-						if slices.Contains([]string{" ", "::", "@", ">>", "<<", "^", "*", "/", "//"}, op) {
-							s = append(s[:l-2], fmt.Sprintf("%v%v%v", s[l-2], op, s[l-1]))
-						} else if pp.pr > pp_.pl {
-							s = append(s[:l-2], fmt.Sprintf("(%v %v %v)", s[l-2], op, s[l-1]))
-						} else {
-							s = append(s[:l-2], fmt.Sprintf("%v %v %v", s[l-2], op, s[l-1]))
+
+						right := s[len(s)-1]
+						left := s[len(s)-2]
+						s = s[:len(s)-2]
+
+						opStr := op
+						if !slices.Contains([]string{"::", "@", "^", "*", "/", "//", " "}, op) {
+							opStr = " " + op + " "
 						}
-						pp = pp_
+
+						leftStr := left.text
+						if left.prec.pr < pp.pl {
+							leftStr = "(" + leftStr + ")"
+						}
+
+						rightStr := right.text
+						if right.prec.pl < pp.pr {
+							rightStr = "(" + rightStr + ")"
+						}
+
+						s = append(s, struct {
+							text string
+							prec prec
+						}{
+							leftStr + opStr + rightStr,
+							pp,
+						})
 					} else {
-						x_, err := print(x)
+						text, err := print(x)
 						if err != nil {
 							return "", err
 						}
-						s = append(s, x_)
+						s = append(s, struct {
+							text string
+							prec prec
+						}{text, prec{10000, 10000}})
 					}
 				}
+
 				if len(s) != 1 {
-					return "", fmt.Errorf("unbalanced expression: %v", s)
+					return "", fmt.Errorf("invalid expression: too many operands")
 				}
-				return s[0], nil
+				return s[0].text, nil
 			}
 			return "", fmt.Errorf("expected list of flats: %v", x.Content)
 		case TagOp:

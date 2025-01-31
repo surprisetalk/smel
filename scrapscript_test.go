@@ -1086,12 +1086,12 @@ func TestPrint(t *testing.T) {
 		{"nested_assert", "a + b ? a == 1 ? b == 2 . a = 1 . b = 2", "a + b ? a == 1 ? b == 2 . a = 1 . b = 2"},
 		{"hole", "()", "()"},
 		{"function_app_two_args", "(a -> b -> a + b) 3 2", "(a -> b -> a + b) 3 2"},
-		{"function_create_list", "(a -> b -> [a, b]) 3 2", "(a -> b -> [a, b]) 3 2"},
+		{"function_create_list", "(a -> b -> [a, b]) 3 2", "(a -> b -> [ a, b ]) 3 2"},
 		{"create_record", "{a = 1 + 3}", "{a = 1 + 3}"},
 		{"access_record", `rec@b . rec = { a = 1, b = "x" }`, `rec@b . rec = { a = 1, b = "x" }`},
-		{"access_list", "xs@1 . xs = [1, 2, 3]", "xs@1 . xs = [1, 2, 3]"},
-		{"access_list_var", "xs@y . y = 2 . xs = [1, 2, 3]", "xs@y . y = 2 . xs = [1, 2, 3]"},
-		{"access_list_expr", "xs@(1+1) . xs = [1, 2, 3]", "xs@( 1 + 1 ) . xs = [ 1, 2, 3 ]"},
+		{"access_list", "xs@1 . xs = [1, 2, 3]", "xs@1 . xs = [ 1, 2, 3 ]"},
+		{"access_list_var", "xs@y . y = 2 . xs = [1, 2, 3]", "xs@y . y = 2 . xs = [ 1, 2, 3 ]"},
+		{"access_list_expr", "xs@(1+1) . xs = [1, 2, 3]", "xs@(1 + 1) . xs = [ 1, 2, 3 ]"},
 		{"access_list_closure", "list_at 1 [1,2,3] . list_at = idx -> ls -> ls@idx", "list_at 1 [ 1, 2, 3 ] . list_at = idx -> ls -> ls@idx"},
 		// 		{"compose", "((a -> a + 1) >> (b -> b * 2)) 3", ""},
 		// 		{"double_compose", "((a -> a + 1) >> (x -> x) >> (b -> b * 2)) 3", ""},
@@ -1117,6 +1117,8 @@ func TestPrint(t *testing.T) {
 		// 		{"match_variant", `say (1 < 2) . say = | #false () -> "oh no" | #true () -> "omg"`, ""},
 		// 		{"match_variant_record", `f #add {x = 3, y = 4} . f = | # b () -> "foo" | #add {x = x, y = y} -> x + y`, ""},
 		// 		{"division", "1 / 2 + 3", ""},
+		{"print_parens_r", "3 * (4 + 5)", "3*(4 + 5)"},
+		{"print_parens_l", "(4 + 5) * 3", "(4 + 5)*3"},
 	}
 
 	for _, tt := range tests {
@@ -1127,13 +1129,13 @@ func TestPrint(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Lex failed: %v", err)
 			}
-			t.Log(tokens)
+			// t.Log(tokens)
 
 			flat, err := Parse(tokens)
 			if err != nil {
 				t.Fatalf("Parse failed: %v", err)
 			}
-			t.Log(flat)
+			// t.Log(flat)
 
 			output, err := Print(flat)
 			if err != nil {
