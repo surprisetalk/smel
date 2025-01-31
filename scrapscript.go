@@ -10,6 +10,7 @@ package smel
 import (
 	"encoding/base64"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -294,43 +295,41 @@ type prec struct {
 }
 
 var precs = map[string]prec{
-	" ":   {0, 1},
-	"=":   {2, 1},
-	"->":  {3, 2},
-	"|>":  {4, 5},
-	"<|":  {5, 4},
-	">>":  {6, 7},
-	"<<":  {7, 6},
-	".":   {8, 9},
-	"?":   {10, 11},
-	"@":   {12, 13},
-	"+":   {20, 21},
-	"-":   {20, 21},
-	"*":   {30, 31},
-	"/":   {30, 31},
-	"::":  {2000, 1999},
-	"":    {999, 1000},
-	"^":   {12, 13},
-	"//":  {12, 11},
-	"%":   {12, 11},
-	">*":  {9, 10},
-	"++":  {9, 10},
-	">+":  {10, 9},
-	"+<":  {9, 10},
-	"==":  {9, 9},
-	"/=":  {9, 9},
-	"<":   {9, 9},
-	">":   {9, 9},
-	"<=":  {9, 9},
-	">=":  {9, 9},
-	"&&":  {7, 8},
-	"||":  {6, 7},
-	"#":   {5, 4},
-	"|":   {3, 4},
-	":":   {4, 3},
-	"!":   {3, 2},
-	",":   {1, 1},
-	"...": {0, 0},
+	"::": {2000, 1999.9},
+	"@":  {1001, 1001.1},
+	" ":  {1000, 1000.1},
+	">>": {14, 13.9},
+	"<<": {14, 13.9},
+	"^":  {13, 13.1},
+	"*":  {12, 12.1},
+	"/":  {12, 12.1},
+	"//": {12, 11.9},
+	"%":  {12, 11.9},
+	"+":  {11, 10.9},
+	"-":  {11, 10.9},
+	">*": {10, 10.1},
+	"++": {10, 10.1},
+	">+": {10, 9.9},
+	"+<": {10, 10.1},
+	"==": {9, 9},
+	"/=": {9, 9},
+	"<":  {9, 9},
+	">":  {9, 9},
+	"<=": {9, 9},
+	">=": {9, 9},
+	"&&": {8, 8.1},
+	"||": {7, 7.1},
+	"|>": {6, 6.1},
+	"<|": {6, 5.9},
+	"#":  {5.5, 5.4},
+	"->": {5, 4.9},
+	"|":  {4.5, 4.6},
+	":":  {4.5, 4.4},
+	"=":  {4, 4.1},
+	"!":  {3, 2.9},
+	".":  {3, 3.1},
+	"?":  {3, 3.1},
+	// ",":  {1, 0},
 }
 
 const highestPrec = 100.0
@@ -374,8 +373,11 @@ func (p *parser) parseUnary(prec float64) (Flat, error) {
 	}
 
 	switch token.Type {
-	case TokenIntLit, TokenFloatLit, TokenName, TokenStringLit, TokenBytesLit:
+	case TokenIntLit, TokenFloatLit, TokenStringLit, TokenBytesLit:
 		return cbor.Marshal(token.Value)
+
+	case TokenName:
+		return cbor.Marshal(cbor.Tag{TagVar, token.Value})
 
 	case TokenHash:
 		tag := p.next()
@@ -642,11 +644,24 @@ func print(v interface{}) (string, error) {
 		switch x.Number {
 		case TagExpr:
 			if xs, ok := x.Content.([]interface{}); ok {
+				pp := prec{0, 0}
 				s := []string{}
 				for _, x := range xs {
 					if x_, ok := x.(cbor.Tag); ok && x_.Number == TagOp {
 						l := len(s)
-						s = append(s[:l-2], fmt.Sprintf("%v %v %v", s[l-2], x_.Content, s[l-1]))
+						op := x_.Content.(string)
+						pp_, ok := precs[op]
+						if !ok {
+							return "", fmt.Errorf("unrecognized operator precendence: %v", op)
+						}
+						if slices.Contains([]string{" ", "::", "@", ">>", "<<", "^", "*", "/", "//"}, op) {
+							s = append(s[:l-2], fmt.Sprintf("%v%v%v", s[l-2], op, s[l-1]))
+						} else if pp.pr > pp_.pl {
+							s = append(s[:l-2], fmt.Sprintf("(%v %v %v)", s[l-2], op, s[l-1]))
+						} else {
+							s = append(s[:l-2], fmt.Sprintf("%v %v %v", s[l-2], op, s[l-1]))
+						}
+						pp = pp_
 					} else {
 						x_, err := print(x)
 						if err != nil {
