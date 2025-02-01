@@ -462,40 +462,33 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 				if next.Type == TokenRightBrace {
 					break
 				}
-				if next.Type != TokenOperator || next.Value != "," {
-					return nil, fmt.Errorf("expected , between record fields")
-				}
-			}
-			{
-				l, err := p.parseUnary(prec)
-				if err != nil {
-					return nil, err
-				}
-				if len(l) != 1 {
-					return nil, fmt.Errorf("bad record")
-				}
-				var k string
-				err = cbor.Unmarshal(l[0], &k)
-				if err != nil {
-					return nil, err
+				if next.Type != TokenName {
+					return nil, fmt.Errorf("expected record key")
 				}
 				// TODO: Handle spread.
-				next := p.next()
-				if next == nil {
-					return nil, fmt.Errorf("expected =")
-				}
+				k := next.Value.(string)
+				next = p.next()
 				if next.Type != TokenOperator || next.Value != "=" {
 					return nil, fmt.Errorf("expected = after record key")
 				}
-				r, err := p.parseBinary(precs[","].pr + 1)
+				v, err := p.parseBinary(precs[","].pr + 1)
 				if err != nil {
 					return nil, err
 				}
-				r_, err := expr(r)
+				v_, err := expr(v)
 				if err != nil {
 					return nil, err
 				}
-				record[k] = r_
+				record[k] = v_
+			}
+			{
+				next := p.next()
+				if next.Type == TokenRightBrace {
+					break
+				}
+				if next.Type != TokenOperator || next.Value != "," {
+					return nil, fmt.Errorf("expected , between record items but received: %v", next.Value)
+				}
 			}
 		}
 		return value(cbor.Marshal(record))
