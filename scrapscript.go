@@ -637,7 +637,7 @@ func print(v interface{}) (string, error) {
 		}
 		return fmt.Sprintf("[ %v ]", strings.Join(xs_, ", ")), nil
 	}
-	if xs, ok := (v).(map[string]interface{}); ok {
+	if xs, ok := (v).(map[interface{}]interface{}); ok {
 		if len(xs) == 0 {
 			return "{}", nil
 		}
@@ -650,9 +650,6 @@ func print(v interface{}) (string, error) {
 			xs_ = append(xs_, fmt.Sprintf("%v = %v", k, x_))
 		}
 		return fmt.Sprintf("{ %v }", strings.Join(xs_, ", ")), nil
-	}
-	if _, ok := (v).(map[interface{}]interface{}); ok {
-		return "", fmt.Errorf("unsupported record")
 	}
 	if x, ok := (v).(cbor.Tag); ok {
 		switch x.Number {

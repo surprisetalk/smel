@@ -1087,7 +1087,7 @@ func TestPrint(t *testing.T) {
 		{"hole", "()", "()"},
 		{"function_app_two_args", "(a -> b -> a + b) 3 2", "(a -> b -> a + b) 3 2"},
 		{"function_create_list", "(a -> b -> [a, b]) 3 2", "(a -> b -> [ a, b ]) 3 2"},
-		{"create_record", "{a = 1 + 3}", "{a = 1 + 3}"},
+		{"create_record", "{a = 1 + 3}", "{ a = 1 + 3 }"},
 		{"access_record", `rec@b . rec = { a = 1, b = "x" }`, `rec@b . rec = { a = 1, b = "x" }`},
 		{"access_list", "xs@1 . xs = [1, 2, 3]", "xs@1 . xs = [ 1, 2, 3 ]"},
 		{"access_list_var", "xs@y . y = 2 . xs = [1, 2, 3]", "xs@y . y = 2 . xs = [ 1, 2, 3 ]"},
