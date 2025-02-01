@@ -8,6 +8,7 @@
 package smel
 
 import (
+	"cmp"
 	"encoding/base64"
 	"fmt"
 	"slices"
@@ -674,15 +675,29 @@ func print(v interface{}) (string, error) {
 		if len(xs) == 0 {
 			return "{}", nil
 		}
-		xs_ := []string{}
+		type kv struct {
+			k string
+			v string
+		}
+		xs_ := []kv{}
 		for k, x := range xs {
-			x_, err := print(x)
+			v, err := print(x)
 			if err != nil {
 				return "", err
 			}
-			xs_ = append(xs_, fmt.Sprintf("%v = %v", k, x_))
+			xs_ = append(xs_, kv{k.(string), v})
 		}
-		return fmt.Sprintf("{ %v }", strings.Join(xs_, ", ")), nil
+		slices.SortFunc(xs_, func(a, b kv) int {
+			if len(a.k) == len(b.k) {
+				return cmp.Compare(a.k, b.k)
+			}
+			return cmp.Compare(len(a.k), len(b.k))
+		})
+		xs__ := []string{}
+		for _, x_ := range xs_ {
+			xs__ = append(xs__, fmt.Sprintf("%v = %v", x_.k, x_.v))
+		}
+		return fmt.Sprintf("{ %v }", strings.Join(xs__, ", ")), nil
 	}
 	if x, ok := (v).(cbor.Tag); ok {
 		switch x.Number {
