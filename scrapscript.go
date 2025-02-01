@@ -391,6 +391,12 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 		return value(cbor.Marshal(token.Value))
 
 	case TokenName:
+		if token.Value == "true" {
+			return value(cbor.Marshal(true))
+		}
+		if token.Value == "false" {
+			return value(cbor.Marshal(false))
+		}
 		return value(cbor.Marshal(cbor.Tag{TagVar, token.Value}))
 
 	case TokenHash:
@@ -495,6 +501,8 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 
 	case TokenOperator:
 		switch token.Value {
+		case "|":
+			return p.parseBinary(precs["|"].pr + 1)
 		case "-":
 			op := p.peek()
 			switch op.Type {
