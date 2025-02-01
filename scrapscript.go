@@ -30,6 +30,7 @@ const (
 	TagVar  TagType = '='
 	TagTag  TagType = '#'
 	TagDict TagType = '\''
+	TagFun  TagType = '|'
 )
 
 func tagOp(op string) Flat {
@@ -369,12 +370,18 @@ func value(flat Flat, err error) ([]Flat, error) {
 	return []Flat{flat}, err
 }
 
-func expr(flats []Flat) (Flat, error) {
+func expr(flats []Flat, err error) (Flat, error) {
+	if err != nil {
+		return nil, err
+	}
+	if flats == nil {
+		return nil, fmt.Errorf("something went wrong")
+	}
 	l := len(flats)
 	if l == 0 {
 		return nil, fmt.Errorf("empty expression")
 	} else if l == 1 {
-		return flats[0], nil
+		return flats[0], err
 	}
 	return cbor.Marshal(cbor.Tag{TagExpr, flats})
 }
@@ -413,14 +420,14 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 			p.next() // consume )
 			return value(cbor.Marshal(nil))
 		}
-		expr, err := p.parseBinary(0)
+		ex, err := p.parseBinary(0)
 		if err != nil {
 			return nil, err
 		}
 		if next := p.next(); next == nil || next.Type != TokenRightParen {
 			return nil, fmt.Errorf("expected )")
 		}
-		return expr, nil
+		return ex, nil
 
 	case TokenLeftBracket:
 		list := make([]Flat, 0)
@@ -434,15 +441,11 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 					p.next()
 					break
 				}
-				item, err := p.parseBinary(precs[","].pr + 1)
+				item, err := expr(p.parseBinary(precs[","].pr + 1))
 				if err != nil {
 					return nil, err
 				}
-				item_, err := expr(item)
-				if err != nil {
-					return nil, err
-				}
-				list = append(list, item_)
+				list = append(list, item)
 			}
 			{
 				next := p.next()
@@ -476,15 +479,11 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 				if next.Type != TokenOperator || next.Value != "=" {
 					return nil, fmt.Errorf("expected = after record key")
 				}
-				v, err := p.parseBinary(precs[","].pr + 1)
+				v, err := expr(p.parseBinary(precs[","].pr + 1))
 				if err != nil {
 					return nil, err
 				}
-				v_, err := expr(v)
-				if err != nil {
-					return nil, err
-				}
-				record[k] = v_
+				record[k] = v
 			}
 			{
 				next := p.next()
@@ -505,7 +504,28 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 	case TokenOperator:
 		switch token.Value {
 		case "|":
-			return p.parseBinary(precs["|"].pr + 1)
+			fun := []Flat{}
+			for {
+				x, err := expr(p.parseBinary(precs["->"].pr + 0.2))
+				if err != nil {
+					return nil, err
+				}
+				next := p.next()
+				if next == nil {
+					return nil, fmt.Errorf("expected ->")
+				}
+				y, err := expr(p.parseBinary(precs["|"].pr + 0.2))
+				if err != nil {
+					return nil, err
+				}
+				fun = append(fun, x, y)
+				next = p.peek()
+				if next == nil || next.Type != TokenOperator || next.Value != "|" {
+					break
+				}
+				p.next()
+			}
+			return value(cbor.Marshal(cbor.Tag{TagFun, fun}))
 		case "-":
 			op := p.peek()
 			switch op.Type {
@@ -576,6 +596,8 @@ func (p *parser) parseBinary(prec float64) ([]Flat, error) {
 			if TagType(left[0][0]) == TagVar {
 				return nil, fmt.Errorf("expected variable name before =")
 			}
+		case "|":
+			return nil, fmt.Errorf("bad match case")
 		}
 
 		right, err := p.parseBinary(opPrec.pr)
@@ -596,7 +618,7 @@ func Parse(Tokens []Token) (Flat, error) {
 	p := &parser{Tokens: Tokens}
 	resetGensym()
 
-	flat, err := p.parseBinary(0)
+	flat, err := expr(p.parseBinary(0))
 	if err != nil {
 		return nil, err
 	}
@@ -607,7 +629,7 @@ func Parse(Tokens []Token) (Flat, error) {
 		return nil, fmt.Errorf("unexpected Tokens after expression: %v", p.peek())
 	}
 
-	return expr(flat)
+	return flat, nil
 }
 
 //// PRINT
@@ -727,6 +749,36 @@ func print(v interface{}) (string, error) {
 					return "", fmt.Errorf("invalid expression: too many operands")
 				}
 				return s[0].text, nil
+			}
+			return "", fmt.Errorf("expected list of flats: %v", x.Content)
+		case TagFun:
+			if xs, ok := x.Content.([]interface{}); ok {
+				if len(xs) == 0 {
+					return "", fmt.Errorf("empty matcher")
+				}
+				if len(xs)%2 == 1 {
+					return "", fmt.Errorf("unfinished matcher: %v", x.Content)
+				}
+				s := ""
+				for i, x := range xs {
+					if i != 0 {
+						s += " "
+					}
+					x_, err := print(x)
+					if err != nil {
+						return "", err
+					}
+					if i%2 == 0 {
+						if len(xs) == 2 {
+							s += x_
+						} else {
+							s += fmt.Sprintf("| %v", x_)
+						}
+					} else {
+						s += fmt.Sprintf("-> %v", x_)
+					}
+				}
+				return s, nil
 			}
 			return "", fmt.Errorf("expected list of flats: %v", x.Content)
 		case TagOp:
