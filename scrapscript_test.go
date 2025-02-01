@@ -1111,16 +1111,17 @@ func TestPrint(t *testing.T) {
 		{"variant", "# thing ()", "#thing ()"},
 		{"variant_true", "# true ()", "#true ()"},
 		{"variant_false", "#false ()", "#false ()"},
-		// 		{"boolean_ops", "#true () || #true () && boom", ""},
-		// 		{"compare_ops", "1 < 2 && 2 < 1", ""},
-		// 		{"match_list_spread", `f [2, 4, 6] . f = | [] -> 0 | [x, ...] -> x | c -> 1`, ""},
-		// 		{"match_list_named_spread", `tail [1,2,3] . tail = | [first, ...rest] -> rest`, ""},
-		// 		{"match_record_spread", `f {x = 4, y = 5} . f = | {} -> 0 | {x = a, ...} -> a | c -> 1`, ""},
-		// 		{"match_variant", `say (1 < 2) . say = | #false () -> "oh no" | #true () -> "omg"`, ""},
-		// 		{"match_variant_record", `f #add {x = 3, y = 4} . f = | # b () -> "foo" | #add {x = x, y = y} -> x + y`, ""},
-		// 		{"division", "1 / 2 + 3", ""},
+		{"boolean_ops", "#true () || #true () && boom", "#true () || #true () && boom"},
+		{"compare_ops", "1 < 2 && 2 < 1", "1 < 2 && 2 < 1"},
+		{"match_list_spread", `f [2, 4, 6] . f = | [] -> 0 | [x, ...] -> x | c -> 1`, `f [ 2, 4, 6 ] . f = | [] -> 0 | [x, ...] -> x | c -> 1`},
+		{"match_list_named_spread", `tail [1,2,3] . tail = | [first, ...rest] -> rest`, `tail [1,2,3] . tail = | [first, ...rest] -> rest`},
+		{"match_record_spread", `f {x = 4, y = 5} . f = | {} -> 0 | {x = a, ...} -> a | c -> 1`, `f {x = 4, y = 5} . f = | {} -> 0 | {x = a, ...} -> a | c -> 1`},
+		{"match_variant", `say (1 < 2) . say = | #false () -> "oh no" | #true () -> "omg"`, `say (1 < 2) . say = | #false () -> "oh no" | #true () -> "omg"`},
+		{"match_variant_record", `f #add {x = 3, y = 4} . f = | # b () -> "foo" | #add {x = x, y = y} -> x + y`, `f #add { x = 3, y = 4 } . f = | #b () -> "foo" | #add { x = x, y = y } -> x + y`},
+		{"division", "1 / 2 + 3", "1/2 + 3"},
+		{"division", "{ c = 0, aaa = 0, bb = 0 }", "{ c = 0, bb = 0, aaa = 0 }"},
 		{"print_parens_r", "3 * (4 + 5)", "3*(4 + 5)"},
-		{"print_parens_l", "(4 + 5) * 3", "(4 + 5)*3"},
+		{"print_parens_l", "(4 + 5) * 3", "(4 + 5) * 3"},
 	}
 
 	for _, tt := range tests {
@@ -1145,7 +1146,7 @@ func TestPrint(t *testing.T) {
 			}
 
 			if output != tt.expected {
-				t.Fatalf("expected: %v but received: %v", tt.expected, output)
+				t.Fatalf("\nexpected: %v\nreceived: %v", tt.expected, output)
 			}
 		})
 	}

@@ -105,7 +105,7 @@ func (l *lexer) readOperator() (Token, error) {
 		"!": true, "->": true, ".": true, "=": true,
 		",": true, ":": true, "?": true, "|": true,
 		"...": true, "@": true, ">>": true, "<<": true,
-		"|>": true, "<|": true,
+		"|>": true,
 	}
 
 	c1 := l.peek()
@@ -320,7 +320,6 @@ var precs = map[string]prec{
 	"&&": {8, 8.1},
 	"||": {7, 7.1},
 	"|>": {6, 6.1},
-	"<|": {6, 5.9},
 	"#":  {5.5, 5.4},
 	"->": {5, 4.9},
 	"|":  {4.5, 4.6},
@@ -497,7 +496,11 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 				}
 			}
 		}
-		return value(cbor.Marshal(record))
+		em, err := cbor.CanonicalEncOptions().EncMode()
+		if err != nil {
+			return nil, err
+		}
+		return value(em.Marshal(record))
 
 	case TokenOperator:
 		switch token.Value {
@@ -685,8 +688,10 @@ func print(v interface{}) (string, error) {
 						s = s[:len(s)-2]
 
 						opStr := op
-						if !slices.Contains([]string{"::", "@", "^", "*", "/", "//", " "}, op) {
-							opStr = " " + op + " "
+						if op != " " {
+							if !slices.Contains([]string{"::", "@", "^", "*", "/", "//", " "}, op) || left.prec.pr < pp.pl || left.prec.pl == precs[" "].pl || right.prec.pl == precs[" "].pl {
+								opStr = " " + op + " "
+							}
 						}
 
 						leftStr := left.text
