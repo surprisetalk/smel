@@ -100,48 +100,57 @@ func (l *lexer) readWhile(pred func(byte) bool) string {
 	return result.String()
 }
 
-func (l *lexer) readOperator() (Token, error) {
-	ops := map[string]bool{
+// validOperators contains all valid operators, organized by length for efficient lookup
+var validOperators = struct {
+	len1 map[string]bool
+	len2 map[string]bool
+	len3 map[string]bool
+}{
+	len1: map[string]bool{
 		"+": true, "-": true, "*": true, "/": true, "^": true, "%": true,
-		"++": true, "+<": true, ">+": true,
-		"==": true, "/=": true, "<": true, ">": true,
-		"<=": true, ">=": true, "&&": true, "||": true,
-		"!": true, "->": true, ".": true, "=": true,
-		",": true, ":": true, "?": true, "|": true,
-		"...": true, "..": true, "@": true, ">>": true, "<<": true,
-		"|>": true,
+		"<": true, ">": true, "!": true, ".": true, "=": true, ",": true,
+		":": true, "?": true, "|": true, "@": true,
+	},
+	len2: map[string]bool{
+		"++": true, "+<": true, ">+": true, "==": true, "/=": true, "<=": true,
+		">=": true, "&&": true, "||": true, "->": true, "..": true, ">>": true,
+		"<<": true, "|>": true,
+	},
+	len3: map[string]bool{
+		"...": true,
+	},
+}
+
+func (l *lexer) readOperator() (Token, error) {
+	// Try to read a 3-character operator
+	if l.pos+2 < len(l.text) {
+		op3 := string(l.text[l.pos]) + string(l.text[l.pos+1]) + string(l.text[l.pos+2])
+		if validOperators.len3[op3] {
+			l.pos += 3
+			if op3 == "..." {
+				return Token{Type: TokenEtc, Value: nil}, nil
+			}
+			return Token{Type: TokenOperator, Value: op3}, nil
+		}
 	}
 
-	c1 := l.peek()
-	if l.hasInput() {
-		l.advance()
-		if l.hasInput() {
-			c2 := l.peek()
-			if l.hasInput() {
-				c3 := l.peek()
-				op3 := "" + string(c1) + string(c2) + string(c3)
-				if ops[op3] {
-					l.advance()
-					l.advance()
-					if op3 == "..." {
-						return Token{Type: TokenEtc, Value: nil}, nil
-					} else {
-						return Token{Type: TokenOperator, Value: op3}, nil
-					}
-				}
-			}
-			op2 := "" + string(c1) + string(c2)
-			if ops[op2] {
-				l.advance()
-				return Token{Type: TokenOperator, Value: op2}, nil
-			}
-		}
-		op1 := string(c1)
-		if ops[op1] {
-			return Token{Type: TokenOperator, Value: op1}, nil
+	// Try to read a 2-character operator
+	if l.pos+1 < len(l.text) {
+		op2 := string(l.text[l.pos]) + string(l.text[l.pos+1])
+		if validOperators.len2[op2] {
+			l.pos += 2
+			return Token{Type: TokenOperator, Value: op2}, nil
 		}
 	}
-	return Token{}, fmt.Errorf("invalid operator: %s", string(c1))
+
+	// Try to read a 1-character operator
+	op1 := string(l.text[l.pos])
+	if validOperators.len1[op1] {
+		l.pos++
+		return Token{Type: TokenOperator, Value: op1}, nil
+	}
+
+	return Token{}, fmt.Errorf("invalid operator: %s", op1)
 }
 
 func (l *lexer) readBytes() (Token, error) {
