@@ -9,38 +9,21 @@ import (
 
 type Env map[string]interface{}
 
-// Helper functions for type checking and conversion
-func asNumber(v interface{}) (uint64, float64, bool, bool, error) {
-	if i, ok := v.(uint64); ok {
-		return i, 0, true, false, nil
+func numOp(left, right interface{}, intOp func(int64, int64) interface{}, uintOp func(uint64, uint64) interface{}, floatOp func(float64, float64) interface{}) (interface{}, error) {
+	if l, ok := left.(int64); ok {
+		if r, ok := left.(int64); ok {
+			return intOp(l, r), nil
+		}
 	}
-	if f, ok := v.(float64); ok {
-		return 0, f, false, true, nil
+	if l, ok := left.(uint64); ok {
+		if r, ok := left.(uint64); ok {
+			return uintOp(l, r), nil
+		}
 	}
-	return 0, 0, false, false, fmt.Errorf("expected number, got %T", v)
-}
-
-func applyNumericOp(left, right interface{}, intOp func(uint64, uint64) interface{}, floatOp func(float64, float64) interface{}) (interface{}, error) {
-	li, lf, isInt, isFloat, err := asNumber(left)
-	if err != nil {
-		return nil, err
-	}
-	ri, rf, rightIsInt, rightIsFloat, err := asNumber(right)
-	if err != nil {
-		return nil, err
-	}
-
-	if isInt && rightIsInt {
-		return intOp(li, ri), nil
-	}
-	if isFloat && rightIsFloat {
-		return floatOp(lf, rf), nil
-	}
-	if isInt && rightIsFloat {
-		return nil, fmt.Errorf("cannot mix int with float")
-	}
-	if isFloat && rightIsInt {
-		return nil, fmt.Errorf("cannot mix float with int")
+	if l, ok := left.(float64); ok {
+		if r, ok := left.(float64); ok {
+			return floatOp(l, r), nil
+		}
 	}
 	return nil, fmt.Errorf("invalid numeric operands")
 }
@@ -92,6 +75,18 @@ func eval(v interface{}, env Env) (interface{}, error) {
 
 	case cbor.Tag:
 		switch x.Number {
+		case TagFun, TagTag:
+			return x, nil
+
+		case TagVar:
+			if name, ok := x.Content.(string); ok {
+				if val, ok := env[name]; ok {
+					return val, nil
+				}
+				return nil, fmt.Errorf("undefined variable: %v", name)
+			}
+			return nil, fmt.Errorf("invalid variable name")
+
 		case TagExpr:
 			if xs, ok := x.Content.([]interface{}); ok {
 				stack := []interface{}{}
@@ -109,40 +104,43 @@ func eval(v interface{}, env Env) (interface{}, error) {
 						op := tag.Content.(string)
 						switch op {
 						case "+":
-							if s1, ok := left.(string); ok {
-								if s2, ok := right.(string); ok {
-									stack = append(stack, s1+s2)
-									continue
-								}
-							}
-							result, err := applyNumericOp(left, right,
+							result, err := numOp(left, right,
+								func(a, b int64) interface{} { return a + b },
 								func(a, b uint64) interface{} { return a + b },
 								func(a, b float64) interface{} { return a + b })
 							if err != nil {
-								return nil, fmt.Errorf("invalid operands for +")
+								return nil, err
 							}
 							stack = append(stack, result)
 							continue
 						case "-":
-							result, err := applyNumericOp(left, right,
+							result, err := numOp(left, right,
+								func(a, b int64) interface{} { return a - b },
 								func(a, b uint64) interface{} { return a - b },
 								func(a, b float64) interface{} { return a - b })
 							if err != nil {
-								return nil, fmt.Errorf("invalid operands for -")
+								return nil, err
 							}
 							stack = append(stack, result)
 							continue
 						case "*":
-							result, err := applyNumericOp(left, right,
+							result, err := numOp(left, right,
+								func(a, b int64) interface{} { return a * b },
 								func(a, b uint64) interface{} { return a * b },
 								func(a, b float64) interface{} { return a * b })
 							if err != nil {
-								return nil, fmt.Errorf("invalid operands for *")
+								return nil, err
 							}
 							stack = append(stack, result)
 							continue
 						case "/":
-							result, err := applyNumericOp(left, right,
+							result, err := numOp(left, right,
+								func(a, b int64) interface{} {
+									if b == 0 {
+										return fmt.Errorf("division by zero")
+									}
+									return a / b
+								},
 								func(a, b uint64) interface{} {
 									if b == 0 {
 										return fmt.Errorf("division by zero")
@@ -156,12 +154,18 @@ func eval(v interface{}, env Env) (interface{}, error) {
 									return a / b
 								})
 							if err != nil {
-								return nil, fmt.Errorf("invalid operands for /")
+								return nil, err
 							}
 							stack = append(stack, result)
 							continue
 						case "%":
-							result, err := applyNumericOp(left, right,
+							result, err := numOp(left, right,
+								func(a, b int64) interface{} {
+									if b == 0 {
+										return fmt.Errorf("modulo by zero")
+									}
+									return a % b
+								},
 								func(a, b uint64) interface{} {
 									if b == 0 {
 										return fmt.Errorf("modulo by zero")
@@ -172,12 +176,15 @@ func eval(v interface{}, env Env) (interface{}, error) {
 									return fmt.Errorf("modulo not supported for floats")
 								})
 							if err != nil {
-								return nil, fmt.Errorf("invalid operands for %%")
+								return nil, err
 							}
 							stack = append(stack, result)
 							continue
-						case "**":
-							result, err := applyNumericOp(left, right,
+						case "^":
+							result, err := numOp(left, right,
+								func(a, b int64) interface{} {
+									return float64(math.Pow(float64(a), float64(b)))
+								},
 								func(a, b uint64) interface{} {
 									return float64(math.Pow(float64(a), float64(b)))
 								},
@@ -185,11 +192,11 @@ func eval(v interface{}, env Env) (interface{}, error) {
 									return math.Pow(a, b)
 								})
 							if err != nil {
-								return nil, fmt.Errorf("invalid operands for **")
+								return nil, err
 							}
 							stack = append(stack, result)
 							continue
-						case "and":
+						case "&&":
 							l, err := asBool(left)
 							if err != nil {
 								return nil, err
@@ -200,7 +207,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							}
 							stack = append(stack, l && r)
 							continue
-						case "or":
+						case "||":
 							l, err := asBool(left)
 							if err != nil {
 								return nil, err
@@ -211,14 +218,14 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							}
 							stack = append(stack, l || r)
 							continue
-						case "cons":
+						case ">+":
 							r, err := asList(right)
 							if err != nil {
 								return nil, err
 							}
 							stack = append(stack, append([]interface{}{left}, r...))
 							continue
-						case "append":
+						case "++":
 							l, err := asList(left)
 							if err != nil {
 								return nil, err
@@ -226,13 +233,28 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							stack = append(stack, append(l, right))
 							continue
 						case "==":
+							// TODO: Compare as bytes.
 							stack = append(stack, left == right)
 							continue
 						case "!=":
+							// TODO: Compare as bytes.
 							stack = append(stack, left != right)
 							continue
 						case "<", ">", "<=", ">=":
-							result, err := applyNumericOp(left, right,
+							result, err := numOp(left, right,
+								func(a, b int64) interface{} {
+									switch op {
+									case "<":
+										return a < b
+									case ">":
+										return a > b
+									case "<=":
+										return a <= b
+									case ">=":
+										return a >= b
+									}
+									return nil
+								},
 								func(a, b uint64) interface{} {
 									switch op {
 									case "<":
@@ -260,7 +282,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 									return nil
 								})
 							if err != nil {
-								return nil, fmt.Errorf("invalid operands for %s", op)
+								return nil, err
 							}
 							stack = append(stack, result)
 							continue
@@ -318,21 +340,6 @@ func eval(v interface{}, env Env) (interface{}, error) {
 			}
 			return nil, fmt.Errorf("invalid expression")
 
-		case TagVar:
-			if name, ok := x.Content.(string); ok {
-				if val, ok := env[name]; ok {
-					return val, nil
-				}
-				return nil, fmt.Errorf("undefined variable: %v", name)
-			}
-			return nil, fmt.Errorf("invalid variable name")
-
-		case TagFun:
-			return x, nil
-
-		case TagTag:
-			return x, nil
-
 		default:
 			return nil, fmt.Errorf("unsupported tag: %v", x.Number)
 		}
@@ -342,13 +349,13 @@ func eval(v interface{}, env Env) (interface{}, error) {
 	}
 }
 
-func Eval(flat Flat) (Flat, error) {
+func Eval(flat Flat, env Env) (Flat, error) {
 	var v interface{}
 	err := cbor.Unmarshal(flat, &v)
 	if err != nil {
 		return nil, err
 	}
-	res, err := eval(v, make(Env))
+	res, err := eval(v, env)
 	if err != nil {
 		return nil, err
 	}
