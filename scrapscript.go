@@ -941,13 +941,27 @@ func eval(v interface{}, env Env) (interface{}, error) {
 						op := tag.Content.(string)
 						switch op {
 						case "+":
-							if l, ok := left.(int64); ok {
-								if r, ok := right.(int64); ok {
+							if l, ok := left.(uint64); ok {
+								if r, ok := right.(uint64); ok {
+									stack = append(stack, l+r)
+									continue
+								}
+							}
+							if l, ok := left.(float64); ok {
+								if r, ok := right.(float64); ok {
 									stack = append(stack, l+r)
 									continue
 								}
 							}
 							return nil, fmt.Errorf("invalid operands for +")
+						case "/":
+							if l, ok := left.(float64); ok {
+								if r, ok := right.(float64); ok {
+									stack = append(stack, l/r)
+									continue
+								}
+							}
+							return nil, fmt.Errorf("invalid operands for /")
 						case " ":
 							// Function application
 							if fn, ok := left.(cbor.Tag); ok && fn.Number == TagFun {
