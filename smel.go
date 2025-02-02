@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
+	"smel/scrapscript"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"smel/scrapscript"
 )
 
 type model struct {
