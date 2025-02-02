@@ -67,7 +67,6 @@ func TestEval(t *testing.T) {
 			}
 
 			result, err := Eval(ast, tt.env)
-
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("expected error containing %q, got nil", tt.errMsg)
@@ -78,14 +77,13 @@ func TestEval(t *testing.T) {
 				}
 				return
 			}
-
 			if err != nil {
 				t.Fatalf("Eval failed: %v", err)
 			}
 
 			ans, err := Print(result)
 			if err != nil {
-				t.Fatalf("Print failed: %v", result)
+				t.Fatalf("Print failed: %v", err)
 			}
 
 			if ans != tt.expected {

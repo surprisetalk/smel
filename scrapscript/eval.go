@@ -11,17 +11,17 @@ type Env map[string]interface{}
 
 func numOp(left, right interface{}, intOp func(int64, int64) interface{}, uintOp func(uint64, uint64) interface{}, floatOp func(float64, float64) interface{}) (interface{}, error) {
 	if l, ok := left.(int64); ok {
-		if r, ok := left.(int64); ok {
+		if r, ok := right.(int64); ok {
 			return intOp(l, r), nil
 		}
 	}
 	if l, ok := left.(uint64); ok {
-		if r, ok := left.(uint64); ok {
+		if r, ok := right.(uint64); ok {
 			return uintOp(l, r), nil
 		}
 	}
 	if l, ok := left.(float64); ok {
-		if r, ok := left.(float64); ok {
+		if r, ok := right.(float64); ok {
 			return floatOp(l, r), nil
 		}
 	}
@@ -116,7 +116,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 						case "-":
 							result, err := numOp(left, right,
 								func(a, b int64) interface{} { return a - b },
-								func(a, b uint64) interface{} { return a - b },
+								func(a, b uint64) interface{} { return int64(a) - int64(b) },
 								func(a, b float64) interface{} { return a - b })
 							if err != nil {
 								return nil, err
@@ -126,7 +126,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 						case "*":
 							result, err := numOp(left, right,
 								func(a, b int64) interface{} { return a * b },
-								func(a, b uint64) interface{} { return a * b },
+								func(a, b uint64) interface{} { return int64(a) * int64(b) },
 								func(a, b float64) interface{} { return a * b })
 							if err != nil {
 								return nil, err
@@ -136,16 +136,10 @@ func eval(v interface{}, env Env) (interface{}, error) {
 						case "/":
 							result, err := numOp(left, right,
 								func(a, b int64) interface{} {
-									if b == 0 {
-										return fmt.Errorf("division by zero")
-									}
-									return a / b
+									return fmt.Errorf("division not supported for integers")
 								},
 								func(a, b uint64) interface{} {
-									if b == 0 {
-										return fmt.Errorf("division by zero")
-									}
-									return a / b
+									return fmt.Errorf("division not supported for integers")
 								},
 								func(a, b float64) interface{} {
 									if b == 0 {
@@ -183,10 +177,10 @@ func eval(v interface{}, env Env) (interface{}, error) {
 						case "^":
 							result, err := numOp(left, right,
 								func(a, b int64) interface{} {
-									return float64(math.Pow(float64(a), float64(b)))
+									return int64(math.Pow(float64(a), float64(b)))
 								},
 								func(a, b uint64) interface{} {
-									return float64(math.Pow(float64(a), float64(b)))
+									return uint64(math.Pow(float64(a), float64(b)))
 								},
 								func(a, b float64) interface{} {
 									return math.Pow(a, b)
@@ -226,11 +220,11 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							stack = append(stack, append([]interface{}{left}, r...))
 							continue
 						case "++":
-							l, err := asList(left)
-							if err != nil {
-								return nil, err
-							}
-							stack = append(stack, append(l, right))
+							// TODO: For now, just return the expression unevaluated
+							stack = append(stack, cbor.Tag{
+								Number:  TagExpr,
+								Content: []interface{}{left, "++", right},
+							})
 							continue
 						case "==":
 							// TODO: Compare as bytes.
