@@ -32,6 +32,7 @@ const (
 	TagTag  TagType = '#'
 	TagDict TagType = '\''
 	TagFun  TagType = '|'
+	TagEtc  TagType = '.'
 )
 
 func tagOp(op string) Flat {
@@ -62,6 +63,7 @@ const (
 	TokenIntLit
 	TokenFloatLit
 	TokenBytesLit
+	TokenEtc
 )
 
 type Token struct {
@@ -106,7 +108,7 @@ func (l *lexer) readOperator() (Token, error) {
 		"<=": true, ">=": true, "&&": true, "||": true,
 		"!": true, "->": true, ".": true, "=": true,
 		",": true, ":": true, "?": true, "|": true,
-		"...": true, "@": true, ">>": true, "<<": true,
+		"...": true, "..": true, "@": true, ">>": true, "<<": true,
 		"|>": true,
 	}
 
@@ -121,7 +123,11 @@ func (l *lexer) readOperator() (Token, error) {
 				if ops[op3] {
 					l.advance()
 					l.advance()
-					return Token{Type: TokenOperator, Value: op3}, nil
+					if op3 == "..." {
+						return Token{Type: TokenEtc, Value: nil}, nil
+					} else {
+						return Token{Type: TokenOperator, Value: op3}, nil
+					}
 				}
 			}
 			op2 := "" + string(c1) + string(c2)
@@ -298,6 +304,7 @@ type prec struct {
 
 var precs = map[string]prec{
 	"::": {2000, 1999.9},
+	"..": {1500, 1500.1},
 	"@":  {1002, 1002.1},
 	" ":  {1000, 1000.1},
 	">>": {14, 13.9},
@@ -432,6 +439,7 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 
 	case TokenLeftBracket:
 		list := make([]Flat, 0)
+		// TODO: Handle spread.
 		for {
 			{
 				next := p.peek()
@@ -471,20 +479,40 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 				if next.Type == TokenRightBrace {
 					break
 				}
-				if next.Type != TokenName {
-					return nil, fmt.Errorf("expected record key")
+				if next.Type == TokenEtc {
+					v, err := cbor.Marshal(cbor.Tag{TagEtc, ""})
+					if err != nil {
+						return nil, err
+					}
+					record[""] = v
+				} else if next.Type == TokenOperator && next.Value == ".." {
+					next := p.next()
+					if next == nil {
+						return nil, fmt.Errorf("unexpected end during spread")
+					}
+					if next.Type != TokenName {
+						return nil, fmt.Errorf("expected spread variable")
+					}
+					v, err := cbor.Marshal(cbor.Tag{TagEtc, next.Value.(string)})
+					if err != nil {
+						return nil, err
+					}
+					record[""] = v
+				} else {
+					if next.Type != TokenName {
+						return nil, fmt.Errorf("expected record key")
+					}
+					k := next.Value.(string)
+					next = p.next()
+					if next.Type != TokenOperator || next.Value != "=" {
+						return nil, fmt.Errorf("expected = after record key")
+					}
+					v, err := expr(p.parseBinary(precs[","].pr + 1))
+					if err != nil {
+						return nil, err
+					}
+					record[k] = v
 				}
-				// TODO: Handle spread.
-				k := next.Value.(string)
-				next = p.next()
-				if next.Type != TokenOperator || next.Value != "=" {
-					return nil, fmt.Errorf("expected = after record key")
-				}
-				v, err := expr(p.parseBinary(precs[","].pr + 1))
-				if err != nil {
-					return nil, err
-				}
-				record[k] = v
 			}
 			{
 				next := p.next()
@@ -501,6 +529,9 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 			return nil, err
 		}
 		return value(em.Marshal(record))
+
+	case TokenEtc:
+		return value(cbor.Marshal(cbor.Tag{TagEtc, ""}))
 
 	case TokenOperator:
 		switch token.Value {
@@ -544,8 +575,15 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 				return right, err
 
 			}
-		case "...":
-			return value(cbor.Marshal(cbor.Tag{TagVar, "..."}))
+		case "..":
+			next := p.next()
+			if next == nil {
+				return nil, fmt.Errorf("unexpected end during spread")
+			}
+			if next.Type != TokenName {
+				return nil, fmt.Errorf("expected spread variable")
+			}
+			return value(cbor.Marshal(cbor.Tag{TagEtc, next.Value.(string)}))
 		}
 	}
 
@@ -695,7 +733,11 @@ func print(v interface{}) (string, error) {
 		})
 		xs__ := []string{}
 		for _, x_ := range xs_ {
-			xs__ = append(xs__, fmt.Sprintf("%v = %v", x_.k, x_.v))
+			if x_.k == "" {
+				xs__ = append(xs__, fmt.Sprintf("%v", x_.v))
+			} else {
+				xs__ = append(xs__, fmt.Sprintf("%v = %v", x_.k, x_.v))
+			}
 		}
 		return fmt.Sprintf("{ %v }", strings.Join(xs__, ", ")), nil
 	}
@@ -809,6 +851,15 @@ func print(v interface{}) (string, error) {
 		case TagTag:
 			if s, ok := x.Content.(string); ok {
 				return "#" + s, nil
+			}
+			return "", fmt.Errorf("non-string tag")
+		case TagEtc:
+			if s, ok := x.Content.(string); ok {
+				if s == "" {
+					return "...", nil
+				} else {
+					return ".." + s, nil
+				}
 			}
 			return "", fmt.Errorf("non-string tag")
 		}

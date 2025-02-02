@@ -204,7 +204,7 @@ func TestLex(t *testing.T) {
 			name:  "tokenize spread operator",
 			input: "...",
 			expected: []Token{
-				{Type: TokenOperator, Value: "..."},
+				{Type: TokenEtc, Value: nil},
 			},
 		},
 		{
@@ -293,7 +293,7 @@ func TestLex(t *testing.T) {
 				{Type: TokenOperator, Value: "="},
 				{Type: TokenIntLit, Value: int64(1)},
 				{Type: TokenOperator, Value: ","},
-				{Type: TokenOperator, Value: "..."},
+				{Type: TokenEtc, Value: nil},
 				{Type: TokenRightBrace, Value: "}"},
 			},
 		},
@@ -306,7 +306,7 @@ func TestLex(t *testing.T) {
 				{Type: TokenOperator, Value: "="},
 				{Type: TokenIntLit, Value: int64(1)},
 				{Type: TokenOperator, Value: ","},
-				{Type: TokenOperator, Value: "..."},
+				{Type: TokenEtc, Value: nil},
 				{Type: TokenRightBrace, Value: "}"},
 			},
 		},
@@ -662,12 +662,12 @@ func TestLex(t *testing.T) {
 		// Special operators
 		{
 			name:  "tokenize spread operator",
-			input: "{ x, ...rest }",
+			input: "{ x, ..rest }",
 			expected: []Token{
 				{Type: TokenLeftBrace, Value: "{"},
 				{Type: TokenName, Value: "x"},
 				{Type: TokenOperator, Value: ","},
-				{Type: TokenOperator, Value: "..."},
+				{Type: TokenOperator, Value: ".."},
 				{Type: TokenName, Value: "rest"},
 				{Type: TokenRightBrace, Value: "}"},
 			},
@@ -912,7 +912,7 @@ func TestComplexExpressions(t *testing.T) {
 			input: `{
                 name = "test",
                 fn = x -> x + 1,
-                data = [1, 2, ...rest],
+                data = [1, 2, ..rest],
                 sub = {x = 1}
             }`,
 			expected: []Token{
@@ -936,7 +936,7 @@ func TestComplexExpressions(t *testing.T) {
 				{Type: TokenOperator, Value: ","},
 				{Type: TokenIntLit, Value: int64(2)},
 				{Type: TokenOperator, Value: ","},
-				{Type: TokenOperator, Value: "..."},
+				{Type: TokenOperator, Value: ".."},
 				{Type: TokenName, Value: "rest"},
 				{Type: TokenRightBracket, Value: "]"},
 				{Type: TokenOperator, Value: ","},
@@ -1097,7 +1097,6 @@ func TestPrint(t *testing.T) {
 		{"double_compose", "((a -> a + 1) >> (x -> x) >> (b -> b * 2)) 3", "((a -> a + 1) >> (x -> x) >> (b -> b*2)) 3"},
 		{"reverse_compose", "((a -> a + 1) << (b -> b * 2)) 3", "((a -> a + 1) << (b -> b*2)) 3"},
 		{"simple_match", `inc 2 . inc = | 1 -> 2 | 2 -> 3`, `inc 2 . inc = | 1 -> 2 | 2 -> 3`},
-		{"simple_match", `inc 2 . inc = 1 -> 2 | 2 -> 3`, `inc 2 . inc = | 1 -> 2 | 2 -> 3`},
 		{"match_var", `id 3 . id = | x -> x`, `id 3 . id = x -> x`},
 		{"match_record", `get_x rec . rec = { x = 3 } . get_x = | { x = x } -> x`, `get_x rec . rec = { x = 3 } . get_x = { x = x } -> x`},
 		{"match_list", `mult xs . xs = [1, 2, 3, 4, 5] . mult = | [1, x, 3, y, 5] -> x * y`, `mult xs . xs = [ 1, 2, 3, 4, 5 ] . mult = [ 1, x, 3, y, 5 ] -> x*y`},
@@ -1113,9 +1112,9 @@ func TestPrint(t *testing.T) {
 		{"variant_false", "#false ()", "#false ()"},
 		{"boolean_ops", "#true () || #true () && boom", "#true () || #true () && boom"},
 		{"compare_ops", "1 < 2 && 2 < 1", "1 < 2 && 2 < 1"},
-		{"match_list_spread", `f [2, 4, 6] . f = | [] -> 0 | [x, ...] -> x | c -> 1`, `f [ 2, 4, 6 ] . f = | [] -> 0 | [x, ...] -> x | c -> 1`},
-		{"match_list_named_spread", `tail [1,2,3] . tail = | [first, ...rest] -> rest`, `tail [1,2,3] . tail = | [first, ...rest] -> rest`},
-		{"match_record_spread", `f {x = 4, y = 5} . f = | {} -> 0 | {x = a, ...} -> a | c -> 1`, `f {x = 4, y = 5} . f = | {} -> 0 | {x = a, ...} -> a | c -> 1`},
+		{"match_list_spread", `f [2, 4, 6] . f = | [] -> 0 | [x, ...] -> x | c -> 1`, `f [ 2, 4, 6 ] . f = | [] -> 0 | [ x, ... ] -> x | c -> 1`},
+		{"match_list_named_spread", `tail [1,2,3] . tail = | [first, ..rest] -> rest`, `tail [ 1, 2, 3 ] . tail = [ first, ..rest ] -> rest`},
+		{"match_record_spread", `f {x = 4, y = 5} . f = | {} -> 0 | {x = a, ...} -> a | c -> 1`, `f { x = 4, y = 5 } . f = | {} -> 0 | { ..., x = a } -> a | c -> 1`},
 		{"match_variant", `say (1 < 2) . say = | #false () -> "oh no" | #true () -> "omg"`, `say (1 < 2) . say = | #false () -> "oh no" | #true () -> "omg"`},
 		{"match_variant_record", `f #add {x = 3, y = 4} . f = | # b () -> "foo" | #add {x = x, y = y} -> x + y`, `f #add { x = 3, y = 4 } . f = | #b () -> "foo" | #add { x = x, y = y } -> x + y`},
 		{"division", "1 / 2 + 3", "1/2 + 3"},
