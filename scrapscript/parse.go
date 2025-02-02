@@ -15,6 +15,7 @@ const (
 	TagOp   TagType = '+'
 	TagVar  TagType = '='
 	TagTag  TagType = '#'
+	TagSnap TagType = '\\'
 	TagDict TagType = '\''
 	TagFun  TagType = '|'
 	TagEtc  TagType = '.'

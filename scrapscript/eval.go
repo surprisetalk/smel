@@ -265,7 +265,16 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							stack = append(stack, result)
 							continue
 						case " ":
-							// Function application
+							if tag, ok := left.(cbor.Tag); ok && tag.Number == TagTag {
+								// Evaluate the right-hand expression
+								val, err := eval(right, env)
+								if err != nil {
+									return nil, err
+								}
+								// Return a new tag with the evaluated value
+								stack = append(stack, cbor.Tag{Number: TagTag, Content: val})
+								continue
+							}
 							if fn, ok := left.(cbor.Tag); ok && fn.Number == TagFun {
 								cases := fn.Content.([]interface{})
 								for i := 0; i < len(cases); i += 2 {
@@ -277,7 +286,6 @@ func eval(v interface{}, env Env) (interface{}, error) {
 										newEnv[k] = v
 									}
 
-									// Basic pattern matching
 									if pat, ok := pattern.(cbor.Tag); ok && pat.Number == TagVar {
 										newEnv[pat.Content.(string)] = right
 										result, err := eval(body, newEnv)
@@ -323,10 +331,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 			return x, nil
 
 		case TagTag:
-			if tagName, ok := x.Content.(string); ok {
-				return cbor.Tag{TagTag, tagName}, nil
-			}
-			return nil, fmt.Errorf("invalid tag name")
+			return x, nil
 
 		default:
 			return nil, fmt.Errorf("unsupported tag: %v", x.Number)
@@ -337,13 +342,17 @@ func eval(v interface{}, env Env) (interface{}, error) {
 	}
 }
 
-func Eval(flat Flat) (interface{}, error) {
+func Eval(flat Flat) (Flat, error) {
 	var v interface{}
 	err := cbor.Unmarshal(flat, &v)
 	if err != nil {
 		return nil, err
 	}
-	return eval(v, make(Env))
+	res, err := eval(v, make(Env))
+	if err != nil {
+		return nil, err
+	}
+	return cbor.Marshal(res)
 }
 
 /*
