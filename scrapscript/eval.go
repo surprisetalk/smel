@@ -230,7 +230,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							// TODO: Compare as bytes.
 							stack = append(stack, left == right)
 							continue
-						case "!=":
+						case "/=":
 							// TODO: Compare as bytes.
 							stack = append(stack, left != right)
 							continue
