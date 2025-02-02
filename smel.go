@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"smel/scrapscript"
 )
 
 type model struct {
@@ -45,17 +46,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, func() tea.Msg {
-				tokens, err := Lex(m.input)
+				tokens, err := scrapscript.Lex(m.input)
 				if err != nil {
 					return evalResultMsg{err: err}
 				}
 
-				flat, err := Parse(tokens)
+				flat, err := scrapscript.Parse(tokens)
 				if err != nil {
 					return evalResultMsg{err: err}
 				}
 
-				result, err := Print(flat)
+				result, err := scrapscript.Print(flat)
 				return evalResultMsg{
 					output: strings.TrimSpace(result),
 					err:    err,
