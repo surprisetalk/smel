@@ -5,10 +5,9 @@
 *
  */
 
-package smel_test
+package main
 
 import (
-	. "smel"
 	"strings"
 	"testing"
 )

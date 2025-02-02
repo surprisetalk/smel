@@ -1,8 +1,7 @@
-package smel
+package main
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -46,12 +45,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			return m, func() tea.Msg {
-				cmd := exec.Command("python3", "scrapscript.py", "eval", "-")
-				cmd.Stdin = strings.NewReader(m.input)
-				cmd.Dir = "../scrapscript.py"
-				output, err := cmd.CombinedOutput()
+				tokens, err := Lex(m.input)
+				if err != nil {
+					return evalResultMsg{err: err}
+				}
+
+				flat, err := Parse(tokens)
+				if err != nil {
+					return evalResultMsg{err: err}
+				}
+
+				result, err := Print(flat)
 				return evalResultMsg{
-					output: strings.TrimSpace(string(output)),
+					output: strings.TrimSpace(result),
 					err:    err,
 				}
 			}

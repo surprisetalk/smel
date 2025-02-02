@@ -5,7 +5,7 @@
 *
  */
 
-package smel
+package main
 
 import (
 	"cmp"
