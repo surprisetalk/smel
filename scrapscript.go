@@ -889,545 +889,137 @@ func Print(flat Flat) (string, error) {
 
 //// EVAL
 
-/*
-type Env map[string]*Object
+type Env map[string]interface{}
 
-func Match(obj, pattern *Object) (Env, error) {
-	switch pattern.Type {
-	case NodeHole:
-		if obj.Type == NodeHole {
-			return Env{}, nil
-		}
+func eval(v interface{}, env Env) (interface{}, error) {
+	if v == nil {
 		return nil, nil
+	}
 
-	case NodeInt:
-		if obj.Type == NodeInt && obj.IntVal == pattern.IntVal {
-			return Env{}, nil
+	switch x := v.(type) {
+	case bool, uint64, int64, float64, []byte, string:
+		return x, nil
+
+	case []interface{}:
+		result := make([]interface{}, len(x))
+		for i, item := range x {
+			val, err := eval(item, env)
+			if err != nil {
+				return nil, err
+			}
+			result[i] = val
 		}
-		return nil, nil
+		return result, nil
 
-	case NodeFloat:
-		return nil, fmt.Errorf("pattern matching is not supported for Floats")
-
-	case NodeString:
-		if obj.Type == NodeString && obj.StrVal == pattern.StrVal {
-			return Env{}, nil
+	case map[interface{}]interface{}:
+		result := make(map[interface{}]interface{})
+		for k, v := range x {
+			val, err := eval(v, env)
+			if err != nil {
+				return nil, err
+			}
+			result[k] = val
 		}
-		return nil, nil
+		return result, nil
 
-	case NodeVar:
-		return Env{pattern.Name: obj}, nil
+	case cbor.Tag:
+		switch x.Number {
+		case TagExpr:
+			if xs, ok := x.Content.([]interface{}); ok {
+				stack := []interface{}{}
 
-	case NodeVariant:
-		if obj.Type != NodeVariant {
-			return nil, nil
-		}
-		if obj.Name != pattern.Name {
-			return nil, nil
-		}
-		return Match(obj.Right, pattern.Right)
-
-	case NodeRecord:
-		if obj.Type != NodeRecord {
-			return nil, nil
-		}
-
-		result := make(Env)
-		useSpread := false
-		seenKeys := make(map[string]bool)
-
-		for key, patternItem := range pattern.Fields {
-			if patternItem.Type == NodeSpread {
-				useSpread = true
-				// Handle named spread
-				if patternItem.Name != "" {
-					restRecord := &Object{Type: NodeRecord, Fields: make(map[string]*Object)}
-					for k, v := range obj.Fields {
-						if !seenKeys[k] {
-							restRecord.Fields[k] = v
+				for _, x := range xs {
+					if tag, ok := x.(cbor.Tag); ok && tag.Number == TagOp {
+						if len(stack) < 2 {
+							return nil, fmt.Errorf("insufficient operands for operator")
 						}
+
+						right := stack[len(stack)-1]
+						left := stack[len(stack)-2]
+						stack = stack[:len(stack)-2]
+
+						op := tag.Content.(string)
+						switch op {
+						case "+":
+							if l, ok := left.(int64); ok {
+								if r, ok := right.(int64); ok {
+									stack = append(stack, l+r)
+									continue
+								}
+							}
+							return nil, fmt.Errorf("invalid operands for +")
+						case " ":
+							// Function application
+							if fn, ok := left.(cbor.Tag); ok && fn.Number == TagFun {
+								cases := fn.Content.([]interface{})
+								for i := 0; i < len(cases); i += 2 {
+									pattern := cases[i]
+									body := cases[i+1]
+
+									newEnv := make(Env)
+									for k, v := range env {
+										newEnv[k] = v
+									}
+
+									// Basic pattern matching
+									if pat, ok := pattern.(cbor.Tag); ok && pat.Number == TagVar {
+										newEnv[pat.Content.(string)] = right
+										result, err := eval(body, newEnv)
+										if err != nil {
+											return nil, err
+										}
+										stack = append(stack, result)
+										break
+									}
+								}
+								continue
+							}
+							return nil, fmt.Errorf("invalid function application")
+						default:
+							return nil, fmt.Errorf("unsupported operator: %v", op)
+						}
+					} else {
+						val, err := eval(x, env)
+						if err != nil {
+							return nil, err
+						}
+						stack = append(stack, val)
 					}
-					result[patternItem.Name] = restRecord
 				}
-				break
-			}
 
-			seenKeys[key] = true
-			objItem, ok := obj.Fields[key]
-			if !ok {
-				return nil, nil
-			}
-
-			part, err := Match(objItem, patternItem)
-			if err != nil {
-				return nil, err
-			}
-			if part == nil {
-				return nil, nil
-			}
-
-			// Merge part into result
-			for k, v := range part {
-				result[k] = v
-			}
-		}
-
-		if !useSpread && len(pattern.Fields) != len(obj.Fields) {
-			return nil, nil
-		}
-
-		return result, nil
-
-	case NodeList:
-		if obj.Type != NodeList {
-			return nil, nil
-		}
-
-		result := make(Env)
-		useSpread := false
-
-		for i, patternItem := range pattern.Params {
-			if patternItem.Type == NodeSpread {
-				useSpread = true
-				// Handle named spread
-				if patternItem.Name != "" {
-					restList := &Object{Type: NodeList, Params: obj.Params[i:]}
-					result[patternItem.Name] = restList
+				if len(stack) != 1 {
+					return nil, fmt.Errorf("invalid expression: wrong number of values on stack")
 				}
-				break
+				return stack[0], nil
 			}
+			return nil, fmt.Errorf("invalid expression")
 
-			if i >= len(obj.Params) {
-				return nil, nil
+		case TagVar:
+			if name, ok := x.Content.(string); ok {
+				if val, ok := env[name]; ok {
+					return val, nil
+				}
+				return nil, fmt.Errorf("undefined variable: %v", name)
 			}
+			return nil, fmt.Errorf("invalid variable name")
 
-			part, err := Match(obj.Params[i], patternItem)
-			if err != nil {
-				return nil, err
-			}
-			if part == nil {
-				return nil, nil
-			}
+		case TagFun, TagTag:
+			return x, nil
 
-			// Merge part into result
-			for k, v := range part {
-				result[k] = v
-			}
+		default:
+			return nil, fmt.Errorf("unsupported tag: %v", x.Number)
 		}
-
-		if !useSpread && len(pattern.Params) != len(obj.Params) {
-			return nil, nil
-		}
-
-		return result, nil
 
 	default:
-		return nil, fmt.Errorf("match not implemented for %v", pattern.Type)
+		return nil, fmt.Errorf("unsupported type: %T", v)
 	}
 }
 
-type BinopHandler func(env Env, left, right *Object) (*Object, error)
-
-var BINOP_HANDLERS = map[string]BinopHandler{
-	"+": func(env Env, left, right *Object) (*Object, error) {
-		if left.Type == NodeInt && right.Type == NodeInt {
-			return &Object{Type: NodeInt, IntVal: left.IntVal + right.IntVal}, nil
-		} else if left.Type == NodeFloat && right.Type == NodeFloat {
-			return &Object{Type: NodeFloat, FloatVal: left.FloatVal + right.FloatVal}, nil
-		}
-		return nil, fmt.Errorf("cannot add %v and %v", left.Type, right.Type)
-	},
-	"-": func(env Env, left, right *Object) (*Object, error) {
-		if left.Type == NodeInt && right.Type == NodeInt {
-			return &Object{Type: NodeInt, IntVal: left.IntVal - right.IntVal}, nil
-		} else if left.Type == NodeFloat && right.Type == NodeFloat {
-			return &Object{Type: NodeFloat, FloatVal: left.FloatVal - right.FloatVal}, nil
-		}
-		return nil, fmt.Errorf("cannot subtract %v and %v", left.Type, right.Type)
-	},
-	"*": func(env Env, left, right *Object) (*Object, error) {
-		if left.Type == NodeInt && right.Type == NodeInt {
-			return &Object{Type: NodeInt, IntVal: left.IntVal * right.IntVal}, nil
-		} else if left.Type == NodeFloat && right.Type == NodeFloat {
-			return &Object{Type: NodeFloat, FloatVal: left.FloatVal * right.FloatVal}, nil
-		}
-		return nil, fmt.Errorf("cannot multiply %v and %v", left.Type, right.Type)
-	},
-	"/": func(env Env, left, right *Object) (*Object, error) {
-		if left.Type == NodeFloat && right.Type == NodeFloat {
-			return &Object{Type: NodeFloat, FloatVal: left.FloatVal / right.FloatVal}, nil
-		}
-		return nil, fmt.Errorf("cannot divide %v and %v", left.Type, right.Type)
-	},
-	"//": func(env Env, left, right *Object) (*Object, error) {
-		if left.Type == NodeInt && right.Type == NodeInt {
-			return &Object{Type: NodeInt, IntVal: left.IntVal / right.IntVal}, nil
-		}
-		return nil, fmt.Errorf("cannot floor divide %v and %v", left.Type, right.Type)
-	},
-	"^": func(env Env, left, right *Object) (*Object, error) {
-		if left.Type == NodeInt && right.Type == NodeInt {
-			return &Object{Type: NodeInt, IntVal: int64(math.Pow(float64(left.IntVal), float64(right.IntVal)))}, nil
-		} else if left.Type == NodeFloat && right.Type == NodeFloat {
-			return &Object{Type: NodeFloat, FloatVal: math.Pow(left.FloatVal, right.FloatVal)}, nil
-		}
-		return nil, fmt.Errorf("cannot exponentiate %v and %v", left.Type, right.Type)
-	},
-	"%": func(env Env, left, right *Object) (*Object, error) {
-		if left.Type == NodeInt && right.Type == NodeInt {
-			return &Object{Type: NodeInt, IntVal: left.IntVal % right.IntVal}, nil
-		}
-		return nil, fmt.Errorf("cannot mod %v and %v", left.Type, right.Type)
-	},
-	"==": func(env Env, left, right *Object) (*Object, error) {
-		isEqual := reflect.DeepEqual(left, right)
-		return &Object{
-			Type:  NodeVariant,
-			Name:  map[bool]string{true: "true", false: "false"}[isEqual],
-			Right: &Object{Type: NodeHole},
-		}, nil
-	},
-	"/=": func(env Env, left, right *Object) (*Object, error) {
-		isEqual := reflect.DeepEqual(left, right)
-		return &Object{
-			Type:  NodeVariant,
-			Name:  map[bool]string{true: "false", false: "true"}[isEqual],
-			Right: &Object{Type: NodeHole},
-		}, nil
-	},
-	"<": func(env Env, left, right *Object) (*Object, error) {
-		if left.Type == NodeInt && right.Type == NodeInt {
-			result := left.IntVal < right.IntVal
-			return &Object{
-				Type:  NodeVariant,
-				Name:  map[bool]string{true: "true", false: "false"}[result],
-				Right: &Object{Type: NodeHole},
-			}, nil
-		} else if left.Type == NodeFloat && right.Type == NodeFloat {
-			result := left.FloatVal < right.FloatVal
-			return &Object{
-				Type:  NodeVariant,
-				Name:  map[bool]string{true: "true", false: "false"}[result],
-				Right: &Object{Type: NodeHole},
-			}, nil
-		}
-		return nil, fmt.Errorf("cannot compare %v and %v", left.Type, right.Type)
-	},
-	">": func(env Env, left, right *Object) (*Object, error) {
-		if left.Type == NodeInt && right.Type == NodeInt {
-			result := left.IntVal > right.IntVal
-			return &Object{
-				Type:  NodeVariant,
-				Name:  map[bool]string{true: "true", false: "false"}[result],
-				Right: &Object{Type: NodeHole},
-			}, nil
-		} else if left.Type == NodeFloat && right.Type == NodeFloat {
-			result := left.FloatVal > right.FloatVal
-			return &Object{
-				Type:  NodeVariant,
-				Name:  map[bool]string{true: "true", false: "false"}[result],
-				Right: &Object{Type: NodeHole},
-			}, nil
-		}
-		return nil, fmt.Errorf("cannot compare %v and %v", left.Type, right.Type)
-	},
-	"<=": func(env Env, left, right *Object) (*Object, error) {
-		if left.Type == NodeInt && right.Type == NodeInt {
-			result := left.IntVal <= right.IntVal
-			return &Object{
-				Type:  NodeVariant,
-				Name:  map[bool]string{true: "true", false: "false"}[result],
-				Right: &Object{Type: NodeHole},
-			}, nil
-		} else if left.Type == NodeFloat && right.Type == NodeFloat {
-			result := left.FloatVal <= right.FloatVal
-			return &Object{
-				Type:  NodeVariant,
-				Name:  map[bool]string{true: "true", false: "false"}[result],
-				Right: &Object{Type: NodeHole},
-			}, nil
-		}
-		return nil, fmt.Errorf("cannot compare %v and %v", left.Type, right.Type)
-	},
-	">=": func(env Env, left, right *Object) (*Object, error) {
-		if left.Type == NodeInt && right.Type == NodeInt {
-			result := left.IntVal >= right.IntVal
-			return &Object{
-				Type:  NodeVariant,
-				Name:  map[bool]string{true: "true", false: "false"}[result],
-				Right: &Object{Type: NodeHole},
-			}, nil
-		} else if left.Type == NodeFloat && right.Type == NodeFloat {
-			result := left.FloatVal >= right.FloatVal
-			return &Object{
-				Type:  NodeVariant,
-				Name:  map[bool]string{true: "true", false: "false"}[result],
-				Right: &Object{Type: NodeHole},
-			}, nil
-		}
-		return nil, fmt.Errorf("cannot compare %v and %v", left.Type, right.Type)
-	},
-	"&&": func(env Env, left, right *Object) (*Object, error) {
-		if left.Type == NodeVariant && left.Name == "false" {
-			return left, nil // Short circuit
-		}
-		if left.Type != NodeVariant || (left.Name != "true" && left.Name != "false") {
-			return nil, fmt.Errorf("expected boolean variant, got %v", left.Type)
-		}
-		if right.Type != NodeVariant || (right.Name != "true" && right.Name != "false") {
-			return nil, fmt.Errorf("expected boolean variant, got %v", right.Type)
-		}
-		result := left.Name == "true" && right.Name == "true"
-		return &Object{
-			Type:  NodeVariant,
-			Name:  map[bool]string{true: "true", false: "false"}[result],
-			Right: &Object{Type: NodeHole},
-		}, nil
-	},
-	"||": func(env Env, left, right *Object) (*Object, error) {
-		if left.Type == NodeVariant && left.Name == "true" {
-			return left, nil // Short circuit
-		}
-		if left.Type != NodeVariant || (left.Name != "true" && left.Name != "false") {
-			return nil, fmt.Errorf("expected boolean variant, got %v", left.Type)
-		}
-		if right.Type != NodeVariant || (right.Name != "true" && right.Name != "false") {
-			return nil, fmt.Errorf("expected boolean variant, got %v", right.Type)
-		}
-		result := left.Name == "true" || right.Name == "true"
-		return &Object{
-			Type:  NodeVariant,
-			Name:  map[bool]string{true: "true", false: "false"}[result],
-			Right: &Object{Type: NodeHole},
-		}, nil
-	},
-	"++": func(env Env, left, right *Object) (*Object, error) {
-		if left.Type == NodeString && right.Type == NodeString {
-			return &Object{Type: NodeString, StrVal: left.StrVal + right.StrVal}, nil
-		}
-		return nil, fmt.Errorf("cannot concatenate %v and %v", left.Type, right.Type)
-	},
-	">+": func(env Env, left, right *Object) (*Object, error) {
-		if right.Type != NodeList {
-			return nil, fmt.Errorf("list cons requires list on right, got %v", right.Type)
-		}
-		params := make([]*Object, len(right.Params)+1)
-		params[0] = left
-		copy(params[1:], right.Params)
-		return &Object{Type: NodeList, Params: params}, nil
-	},
-	"+<": func(env Env, left, right *Object) (*Object, error) {
-		if left.Type != NodeList {
-			return nil, fmt.Errorf("list append requires list on left, got %v", left.Type)
-		}
-		params := make([]*Object, len(left.Params)+1)
-		copy(params, left.Params)
-		params[len(left.Params)] = right
-		return &Object{Type: NodeList, Params: params}, nil
-	},
-	// "!": func(env Env, left, right *Object) (*Object, error) {
-	// 	return eval_exp(env, right), nil
-	// },
-}
-
-func eval_exp(env Env, exp *Object) *Object {
-	switch exp.Type {
-	// Base cases - return the values directly
-	case NodeInt, NodeFloat, NodeString, NodeBytes, NodeHole:
-		return exp
-
-	// Variable lookup
-	case NodeVar:
-		value, ok := env[exp.Name]
-		if !ok {
-			panic(fmt.Sprintf("name '%s' is not defined", exp.Name))
-		}
-		return value
-
-	// Constructor cases
-	case NodeVariant:
-		return &Object{
-			Type:  NodeVariant,
-			Name:  exp.Name,                 // Tag stored in Name
-			Right: eval_exp(env, exp.Right), // Value stored in Right
-		}
-
-	case NodeList:
-		params := make([]*Object, len(exp.Params))
-		for i, item := range exp.Params {
-			params[i] = eval_exp(env, item)
-		}
-		return &Object{
-			Type:   NodeList,
-			Params: params,
-		}
-
-	case NodeRecord:
-		fields := make(map[string]*Object)
-		for k, v := range exp.Fields {
-			fields[k] = eval_exp(env, v)
-		}
-		return &Object{
-			Type:   NodeRecord,
-			Fields: fields,
-		}
-
-	// Pattern matching and functions
-	case NodeFunction:
-		if exp.Left.Type != NodeVar {
-			panic(fmt.Sprintf("expected variable in function definition %v", exp.Left))
-		}
-		// Create closure by capturing current environment
-		return &Object{
-			Type:   NodeFunction,
-			Left:   exp.Left,  // Arg
-			Right:  exp.Right, // Body
-			Fields: env,       // Captured environment stored in Fields
-		}
-
-	case NodeMatchFunction:
-		// Similar to function, create closure
-		return &Object{
-			Type:   NodeMatchFunction,
-			Params: exp.Params, // Cases
-			Fields: env,        // Captured environment
-		}
-
-	// Application and special forms
-	case NodeApply:
-		// Special case for quote
-		if exp.Left.Type == NodeVar && exp.Left.Name == "$$quote" {
-			return exp.Right
-		}
-
-		callee := eval_exp(env, exp.Left)
-		arg := eval_exp(env, exp.Right)
-
-		switch callee.Type {
-		case NodeFunction:
-			// Create new environment with captured env + arg binding
-			newEnv := make(Env)
-			for k, v := range callee.Fields { // Captured env
-				newEnv[k] = v
-			}
-			newEnv[callee.Left.Name] = arg // Bind argument
-			return eval_exp(newEnv, callee.Right)
-
-		case NodeMatchFunction:
-			for _, caseObj := range callee.Params {
-				// Each case has pattern in Left and body in Right
-				if m, _ := Match(arg, caseObj.Left); m != nil {
-					newEnv := make(Env)
-					for k, v := range callee.Fields {
-						newEnv[k] = v
-					}
-					for k, v := range m {
-						newEnv[k] = v
-					}
-					return eval_exp(newEnv, caseObj.Right)
-				}
-			}
-			panic("no matching cases")
-
-		default:
-			panic(fmt.Sprintf("attempted to apply a non-function of type %v", callee.Type))
-		}
-
-	case NodeAccess:
-		obj := eval_exp(env, exp.Left)
-		switch obj.Type {
-		case NodeRecord:
-			if exp.Right.Type == NodeVar {
-				if val, ok := obj.Fields[exp.Right.Name]; ok {
-					return val
-				}
-				panic(fmt.Sprintf("no assignment to %s found in record", exp.Right.Name))
-			}
-			panic(fmt.Sprintf("cannot access record field using %v, expected a field name", exp.Right.Type))
-
-		case NodeList:
-			idx := eval_exp(env, exp.Right)
-			if idx.Type == NodeInt {
-				if idx.IntVal < 0 || idx.IntVal >= int64(len(obj.Params)) {
-					panic(fmt.Sprintf("index %d out of bounds for list", idx.IntVal))
-				}
-				return obj.Params[idx.IntVal]
-			}
-			panic(fmt.Sprintf("cannot index into list using type %v, expected integer", idx.Type))
-
-		default:
-			panic(fmt.Sprintf("attempted to access from type %v", obj.Type))
-		}
-
-	// Environment manipulation
-	case NodeAssign:
-		if exp.Left.Type != NodeVar {
-			panic("expected variable name in assignment")
-		}
-
-		value := eval_exp(env, exp.Right)
-
-		// Handle function recursion by allowing function to reference itself
-		if value.Type == NodeFunction || value.Type == NodeMatchFunction {
-			valueCopy := *value
-			newEnv := make(Env)
-			for k, v := range value.Fields {
-				newEnv[k] = v
-			}
-			newEnv[exp.Left.Name] = &valueCopy
-			valueCopy.Fields = newEnv
-			value = &valueCopy
-		}
-
-		newEnv := make(Env)
-		for k, v := range env {
-			newEnv[k] = v
-		}
-		newEnv[exp.Left.Name] = value
-		return &Object{
-			Type:   NodeRecord, // Using Record to represent EnvObject
-			Fields: newEnv,
-		}
-
-	case NodeWhere:
-		if exp.Right.Type == NodeAssign {
-			resEnv := eval_exp(env, exp.Right)
-			if resEnv.Type == NodeRecord { // EnvObject
-				newEnv := make(Env)
-				for k, v := range env {
-					newEnv[k] = v
-				}
-				for k, v := range resEnv.Fields {
-					newEnv[k] = v
-				}
-				return eval_exp(newEnv, exp.Left)
-			}
-		}
-		panic("binding in where must be an assignment")
-
-	case NodeAssert:
-		cond := eval_exp(env, exp.Right)
-		if cond.Type != NodeVariant || cond.Name != "true" {
-			panic(fmt.Sprintf("condition %v failed", exp.Right))
-		}
-		return eval_exp(env, exp.Left)
-
-	case NodeBinOp:
-		handler, ok := BINOP_HANDLERS[exp.Op]
-		if !ok {
-			panic(fmt.Sprintf("no handler for %v", exp.Op))
-		}
-		result, err := handler(env, exp.Left, exp.Right)
-		if err != nil {
-			panic(err)
-		}
-		return result
-
-	case NodeSpread:
-		panic("cannot evaluate a spread")
-
-	default:
-		panic(fmt.Sprintf("eval_exp not implemented for %v", exp.Type))
+func Eval(flat Flat) (interface{}, error) {
+	var v interface{}
+	err := cbor.Unmarshal(flat, &v)
+	if err != nil {
+		return nil, err
 	}
+	return eval(v, make(Env))
 }
-*/
