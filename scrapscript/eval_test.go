@@ -42,7 +42,7 @@ func TestEval(t *testing.T) {
 		{input: "(a -> b -> a + b) 3 2", expected: "5"},
 		{input: "{a = 1 + 2}", expected: "{ a = 3 }"},
 		{input: `{a = 4}@a`, expected: "4"},
-		{input: `{a = 4}@b`, wantErr: true, errMsg: "no assignment to b found in record"},
+		{input: `{a = 4}@b`, wantErr: true, errMsg: "undefined variable: b"},
 		{input: "3 < 4", expected: "true"},
 		{input: "3 > 4", expected: "false"},
 		{input: "3 <= 4", expected: "true"},
@@ -87,7 +87,7 @@ func TestEval(t *testing.T) {
 			}
 
 			if ans != tt.expected {
-				t.Errorf("wrong result\nwant: %#v\ngot:  %#v", tt.expected, result)
+				t.Errorf("wrong result\nwant: %#v\ngot:  %#v", tt.expected, ans)
 			}
 		})
 	}

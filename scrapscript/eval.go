@@ -282,13 +282,19 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							continue
 						case " ":
 							if tag, ok := left.(cbor.Tag); ok && tag.Number == TagTag {
-								// Evaluate the right-hand expression
 								val, err := eval(right, env)
 								if err != nil {
 									return nil, err
 								}
-								// Return a new tag with the evaluated value
-								stack = append(stack, cbor.Tag{Number: TagTag, Content: val})
+								if tag.Content == "true" && right == nil {
+									stack = append(stack, true)
+									continue
+								}
+								if tag.Content == "false" && right == nil {
+									stack = append(stack, false)
+									continue
+								}
+								stack = append(stack, cbor.Tag{TagExpr, []interface{}{tag, val, cbor.Tag{TagOp, " "}}})
 								continue
 							}
 							if fn, ok := left.(cbor.Tag); ok && fn.Number == TagFun {

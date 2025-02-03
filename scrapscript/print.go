@@ -24,7 +24,12 @@ func print(v interface{}) (string, error) {
 		return fmt.Sprintf("%v", x), nil
 	}
 	if x, ok := (v).(float64); ok {
-		return fmt.Sprintf("%v", x), nil
+		s := fmt.Sprintf("%f", x)
+		s = strings.TrimRight(s, "0")
+		if strings.HasSuffix(s, ".") {
+			s = s + "0"
+		}
+		return s, nil
 	}
 	if x, ok := (v).([]byte); ok {
 		return fmt.Sprintf("~~%v", base64.StdEncoding.EncodeToString(x)), nil
