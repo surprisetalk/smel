@@ -1,7 +1,7 @@
 {widget,sub,cmd,err,act,pipe,ui}
 
 ; widget : model => msg =>
-    { init : model
+    { init : model ' cmd msg
     , subs : model -> list (sub msg)
     , update : model -> msg -> model ' cmd msg
     , view : model -> ui msg

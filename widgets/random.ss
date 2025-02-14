@@ -1,7 +1,8 @@
 { init = 
-  { type = type::uniform { min = 0, max = 1 }
-  , last = none
-  }
+    { type = type::uniform { min = 0, max = 1 }
+    , last = none
+    }  
+    ' cmd/none
 , subs = [ in (#roll ()) ]
 , update = model ->
     | #roll _ -> model.type
