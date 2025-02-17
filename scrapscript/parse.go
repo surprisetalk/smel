@@ -344,7 +344,7 @@ func (p *parser) parseBinary(prec float64) ([]Flat, error) {
 		return left, nil
 	}
 
-	expr := left
+	exps := left
 	for {
 		op := p.peek()
 		if op == nil {
@@ -364,7 +364,7 @@ func (p *parser) parseBinary(prec float64) ([]Flat, error) {
 			if err != nil {
 				return nil, err
 			}
-			expr = append(expr, append(right, tagOp(" "))...)
+			exps = append(exps, append(right, tagOp(" "))...)
 			continue
 		}
 
@@ -388,10 +388,28 @@ func (p *parser) parseBinary(prec float64) ([]Flat, error) {
 		if err != nil {
 			return nil, err
 		}
-		expr = append(expr, append(right, tagOp(op.Value.(string)))...)
+
+		if op.Value.(string) == "->" {
+			l, err := expr(exps, nil)
+			if err != nil {
+				return nil, err
+			}
+			r, err := expr(right, nil)
+			if err != nil {
+				return nil, err
+			}
+			// TODO: Shouldn't we be able to do `cbor.Tag{TagFun, []cbor.Tag{{TagExpr, exps}, {TagExpr, right}}}`? It's not working for some reason.
+			exp, err := cbor.Marshal(cbor.Tag{TagFun, []Flat{l, r}})
+			if err != nil {
+				return nil, err
+			}
+			exps = []Flat{exp}
+		} else {
+			exps = append(exps, append(right, tagOp(op.Value.(string)))...)
+		}
 	}
 
-	return expr, nil
+	return exps, nil
 }
 
 func Parse(Tokens []Token) (Flat, error) {

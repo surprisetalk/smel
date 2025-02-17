@@ -298,7 +298,11 @@ func eval(v interface{}, env Env) (interface{}, error) {
 								continue
 							}
 							if fn, ok := left.(cbor.Tag); ok && fn.Number == TagFun {
+								isMatch := false
 								cases := fn.Content.([]interface{})
+								if len(cases) == 0 {
+									return nil, fmt.Errorf("empty function")
+								}
 								for i := 0; i < len(cases); i += 2 {
 									pattern := cases[i]
 									body := cases[i+1]
@@ -315,8 +319,12 @@ func eval(v interface{}, env Env) (interface{}, error) {
 											return nil, err
 										}
 										stack = append(stack, result)
+										isMatch = true
 										break
 									}
+								}
+								if !isMatch {
+									return nil, fmt.Errorf("unmatched function application")
 								}
 								continue
 							}
