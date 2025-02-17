@@ -23,7 +23,7 @@ const (
 
 func tagOp(op string) Flat {
 	// TODO: Do NOT store this as a string! So inefficient.
-	op_, err := cbor.Marshal(cbor.Tag{TagOp, op})
+	op_, err := cbor.Marshal(cbor.Tag{Number: TagOp, Content: op})
 	if err != nil {
 		panic(err)
 	}
@@ -125,9 +125,10 @@ func expr(flats []Flat, err error) (Flat, error) {
 	} else if l == 1 {
 		return flats[0], err
 	}
-	return cbor.Marshal(cbor.Tag{TagExpr, flats})
+	return cbor.Marshal(cbor.Tag{Number: TagExpr, Content: flats})
 }
 
+// TODO: Use prec?
 func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 	token := p.next()
 	if token == nil {
@@ -145,7 +146,7 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 		if token.Value == "false" {
 			return value(cbor.Marshal(false))
 		}
-		return value(cbor.Marshal(cbor.Tag{TagVar, token.Value}))
+		return value(cbor.Marshal(cbor.Tag{Number: TagVar, Content: token.Value}))
 
 	case TokenHash:
 		tag := p.next()
@@ -155,7 +156,7 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 		if tag.Type != TokenName {
 			return nil, fmt.Errorf("expected name after #")
 		}
-		return value(cbor.Marshal(cbor.Tag{TagTag, tag.Value}))
+		return value(cbor.Marshal(cbor.Tag{Number: TagTag, Content: tag.Value}))
 
 	case TokenLeftParen:
 		if next := p.peek(); next != nil && next.Type == TokenRightParen {
@@ -214,7 +215,7 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 					break
 				}
 				if next.Type == TokenEtc {
-					v, err := cbor.Marshal(cbor.Tag{TagEtc, ""})
+					v, err := cbor.Marshal(cbor.Tag{Number: TagEtc, Content: ""})
 					if err != nil {
 						return nil, err
 					}
@@ -227,7 +228,7 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 					if next.Type != TokenName {
 						return nil, fmt.Errorf("expected spread variable")
 					}
-					v, err := cbor.Marshal(cbor.Tag{TagEtc, next.Value.(string)})
+					v, err := cbor.Marshal(cbor.Tag{Number: TagEtc, Content: next.Value.(string)})
 					if err != nil {
 						return nil, err
 					}
@@ -239,7 +240,7 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 					k := next.Value.(string)
 					next = p.next()
 					if next.Type == TokenRightBrace || next.Value == "," {
-						v, err := cbor.Marshal(cbor.Tag{TagVar, token.Value})
+						v, err := cbor.Marshal(cbor.Tag{Number: TagVar, Content: token.Value})
 						if err != nil {
 							return nil, err
 						}
@@ -276,7 +277,7 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 		return value(em.Marshal(record))
 
 	case TokenEtc:
-		return value(cbor.Marshal(cbor.Tag{TagEtc, ""}))
+		return value(cbor.Marshal(cbor.Tag{Number: TagEtc, Content: ""}))
 
 	case TokenOperator:
 		switch token.Value {
@@ -302,7 +303,7 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 				}
 				p.next()
 			}
-			return value(cbor.Marshal(cbor.Tag{TagFun, fun}))
+			return value(cbor.Marshal(cbor.Tag{Number: TagFun, Content: fun}))
 		case "-":
 			op := p.peek()
 			switch op.Type {
@@ -328,7 +329,7 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 			if next.Type != TokenName {
 				return nil, fmt.Errorf("expected spread variable")
 			}
-			return value(cbor.Marshal(cbor.Tag{TagEtc, next.Value.(string)}))
+			return value(cbor.Marshal(cbor.Tag{Number: TagEtc, Content: next.Value.(string)}))
 		}
 	}
 
@@ -399,7 +400,7 @@ func (p *parser) parseBinary(prec float64) ([]Flat, error) {
 				return nil, err
 			}
 			// TODO: Shouldn't we be able to do `cbor.Tag{TagFun, []cbor.Tag{{TagExpr, exps}, {TagExpr, right}}}`? It's not working for some reason.
-			exp, err := cbor.Marshal(cbor.Tag{TagFun, []Flat{l, r}})
+			exp, err := cbor.Marshal(cbor.Tag{Number: TagFun, Content: []Flat{l, r}})
 			if err != nil {
 				return nil, err
 			}

@@ -25,7 +25,7 @@ func numOp(left, right interface{}, intOp func(int64, int64) interface{}, uintOp
 			return floatOp(l, r), nil
 		}
 	}
-	return nil, fmt.Errorf("invalid numeric operands")
+	return nil, fmt.Errorf("invalid numeric operands: left=%v (%T), right=%v (%T)", left, left, right, right)
 }
 
 func asBool(v interface{}) (bool, error) {
@@ -83,9 +83,9 @@ func eval(v interface{}, env Env) (interface{}, error) {
 				if val, ok := env[name]; ok {
 					return val, nil
 				}
-				return nil, fmt.Errorf("undefined variable: %v", name)
+				return nil, fmt.Errorf("undefined variable '%v'", name)
 			}
-			return nil, fmt.Errorf("invalid variable name")
+			return nil, fmt.Errorf("invalid variable name: %v", x.Content)
 
 		case TagExpr:
 			if xs, ok := x.Content.([]interface{}); ok {
@@ -94,7 +94,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 				for _, x := range xs {
 					if tag, ok := x.(cbor.Tag); ok && tag.Number == TagOp {
 						if len(stack) < 2 {
-							return nil, fmt.Errorf("insufficient operands for operator")
+							return nil, fmt.Errorf("insufficient operands for operator '%v' (need 2, have %d)", tag.Content, len(stack))
 						}
 
 						right := stack[len(stack)-1]
@@ -294,7 +294,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 									stack = append(stack, false)
 									continue
 								}
-								stack = append(stack, cbor.Tag{TagExpr, []interface{}{tag, val, cbor.Tag{TagOp, " "}}})
+								stack = append(stack, cbor.Tag{Number: TagExpr, Content: []interface{}{tag, val, cbor.Tag{Number: TagOp, Content: " "}}})
 								continue
 							}
 							if fn, ok := left.(cbor.Tag); ok && fn.Number == TagFun {
@@ -342,18 +342,18 @@ func eval(v interface{}, env Env) (interface{}, error) {
 				}
 
 				if len(stack) != 1 {
-					return nil, fmt.Errorf("invalid expression: wrong number of values on stack")
+					return nil, fmt.Errorf("invalid expression: expected 1 value on stack, got %d values", len(stack))
 				}
 				return stack[0], nil
 			}
-			return nil, fmt.Errorf("invalid expression")
+			return nil, fmt.Errorf("invalid expression structure: %v", x.Content)
 
 		default:
-			return nil, fmt.Errorf("unsupported tag: %v", x.Number)
+			return nil, fmt.Errorf("unsupported tag number: %v", x.Number)
 		}
 
 	default:
-		return nil, fmt.Errorf("unsupported type: %T", v)
+		return nil, fmt.Errorf("unsupported type: %v (%T)", v, v)
 	}
 }
 

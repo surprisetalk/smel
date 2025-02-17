@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/fxamacker/cbor/v2"
 )
 
 type model struct {
@@ -73,7 +74,13 @@ func init() {
 			continue
 		}
 		key := strings.TrimSuffix(file.Name(), ".ss")
-		env[key] = flat
+		var v interface{}
+		err = cbor.Unmarshal(flat, &v)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error unmarshalling file", file.Name()+":", err)
+			continue
+		}
+		env[key] = v
 	}
 }
 
