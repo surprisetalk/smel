@@ -247,7 +247,7 @@ func (l *lexer) nextToken() (Token, error) {
 		return l.readOperator()
 	case unicode.IsLetter(rune(c)) || c == '$' || c == '_':
 		id := l.readWhile(func(c byte) bool {
-			return unicode.IsLetter(rune(c)) || unicode.IsDigit(rune(c)) || c == '$' || c == '\'' || c == '_'
+			return unicode.IsLetter(rune(c)) || unicode.IsDigit(rune(c)) || c == '$' || c == '\'' || c == '_' || c == '/'
 		})
 		return Token{Type: TokenName, Value: id}, nil
 	}
