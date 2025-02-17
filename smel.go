@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"smel/scrapscript"
 	"strings"
 	"time"
@@ -35,11 +37,51 @@ type evalResultMsg struct {
 	err    error
 }
 
+var env = make(map[string]interface{})
+
+// TODO: These should go in the scrapyard rather than passed via env.
+func init() {
+	files, err := os.ReadDir("./widgets")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error reading widgets directory:", err)
+		return
+	}
+	for _, file := range files {
+		if !strings.HasSuffix(file.Name(), ".ss") {
+			fmt.Fprintln(os.Stderr, "not a scrapscript file", file.Name()+":", err)
+			continue
+		}
+		filePath := filepath.Join("./widgets", file.Name())
+		content, err := os.ReadFile(filePath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error reading file", file.Name()+":", err)
+			continue
+		}
+		m := struct {
+			input string
+		}{
+			input: string(content),
+		}
+		tokens, err := scrapscript.Lex(m.input)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error lexing file", file.Name()+":", err)
+			continue
+		}
+		flat, err := scrapscript.Parse(tokens)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error parsing file", file.Name()+":", err)
+			continue
+		}
+		key := strings.TrimSuffix(file.Name(), ".ss")
+		env[key] = flat
+	}
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
-		case tea.KeyCtrlC, tea.KeyEsc:
+		case tea.KeyCtrlC, tea.KeyCtrlD, tea.KeyEsc:
 			return m, tea.Quit
 		case tea.KeyEnter:
 			if m.input == "" {
@@ -52,6 +94,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				flat, err := scrapscript.Parse(tokens)
+				if err != nil {
+					return evalResultMsg{err: err}
+				}
+
+				flat, err = scrapscript.Eval(flat, env)
 				if err != nil {
 					return evalResultMsg{err: err}
 				}

@@ -5,9 +5,9 @@
     ' cmd/none
 , subs = [ in (#roll ()) ]
 , update = model ->
-    | #roll _ -> model.type
-        | { ..., type = #uniform { min, max } } -> model ' (random (n -> n * (max - min) - min) |> task/perform #out)
-        | _ -> model ' cmd/err "TODO"
+    -- | #roll _ -> model.type
+    --     | { ..., type = #uniform { min, max } } -> model ' (random (n -> n * (max - min) - min) |> task/perform #out)
+    --     | _ -> model ' cmd/err "TODO"
     | #type type -> { ..model, type } ' cmd/none
     | #out n -> { ..model, last = some n } ' cmd/out n
 , view = { type, last } ->
@@ -36,9 +36,9 @@
     ]
 }
 
-; type :
-    #uniform { min : float, max : float }
-    #normal { mu : float, sigma : float }
-    #exponential { lambda : float }
-    #poisson { lambda : float }
-    #binomial { n : int, p : float }
+-- . type :
+--     #uniform { min : float, max : float }
+--     #normal { mu : float, sigma : float }
+--     #exponential { lambda : float }
+--     #poisson { lambda : float }
+--     #binomial { n : int, p : float }

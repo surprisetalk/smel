@@ -61,6 +61,7 @@ var precs = map[string]prec{
 	">=": {9, 9},
 	"&&": {8, 8.1},
 	"||": {7, 7.1},
+	"'":  {6.5, 6.4},
 	"|>": {6, 6.1},
 	"#":  {5.5, 5.4},
 	"->": {5, 4.9},
@@ -237,6 +238,17 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 					}
 					k := next.Value.(string)
 					next = p.next()
+					if next.Type == TokenRightBrace || next.Value == "," {
+						v, err := cbor.Marshal(cbor.Tag{TagVar, token.Value})
+						if err != nil {
+							return nil, err
+						}
+						record[k] = v
+						if next.Type == TokenRightBrace {
+							break
+						}
+						continue
+					}
 					if next.Type != TokenOperator || next.Value != "=" {
 						return nil, fmt.Errorf("expected = after record key")
 					}

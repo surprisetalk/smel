@@ -78,12 +78,12 @@ var validOperators = struct {
 	len1: map[string]bool{
 		"+": true, "-": true, "*": true, "/": true, "^": true, "%": true,
 		"<": true, ">": true, "!": true, ".": true, "=": true, ",": true,
-		":": true, "?": true, "|": true, "@": true,
+		":": true, "?": true, "|": true, "@": true, "'": true, ";": true,
 	},
 	len2: map[string]bool{
 		"++": true, "+<": true, ">+": true, "==": true, "/=": true, "<=": true,
 		">=": true, "&&": true, "||": true, "->": true, "..": true, ">>": true,
-		"<<": true, "|>": true,
+		"<<": true, "|>": true, "::": true,
 	},
 	len3: map[string]bool{
 		"...": true,
@@ -243,7 +243,7 @@ func (l *lexer) nextToken() (Token, error) {
 			']': TokenRightBracket,
 		}
 		return Token{Type: custom[c], Value: string(c)}, nil
-	case strings.ContainsRune("+-*/<>=!&|.,:|?@^%", rune(c)):
+	case strings.ContainsRune("+-*/<>=!&|.,:|?@^%'", rune(c)):
 		return l.readOperator()
 	case unicode.IsLetter(rune(c)) || c == '$' || c == '_':
 		id := l.readWhile(func(c byte) bool {
