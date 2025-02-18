@@ -12,32 +12,6 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
-type model struct {
-	input      string
-	output     string
-	err        error
-	showCursor bool
-}
-
-func initial() model {
-	return model{
-		showCursor: true,
-	}
-}
-
-func (m model) Init() tea.Cmd {
-	return tea.Batch(tea.EnableMouseCellMotion, tea.Tick(time.Second, func(t time.Time) tea.Msg {
-		return tickMsg(t)
-	}))
-}
-
-type tickMsg time.Time
-
-type evalResultMsg struct {
-	output string
-	err    error
-}
-
 var env = make(map[string]interface{})
 
 // TODO: These should go in the scrapyard rather than passed via env.
@@ -82,6 +56,32 @@ func init() {
 		}
 		env[key] = v
 	}
+}
+
+type model struct {
+	input      string
+	output     string
+	err        error
+	showCursor bool
+}
+
+func initial() model {
+	return model{
+		showCursor: true,
+	}
+}
+
+func (m model) Init() tea.Cmd {
+	return tea.Batch(tea.EnableMouseCellMotion, tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	}))
+}
+
+type tickMsg time.Time
+
+type evalResultMsg struct {
+	output string
+	err    error
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {

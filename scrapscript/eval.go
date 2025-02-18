@@ -10,14 +10,20 @@ import (
 type Env map[string]interface{}
 
 func numOp(left, right interface{}, intOp func(int64, int64) interface{}, uintOp func(uint64, uint64) interface{}, floatOp func(float64, float64) interface{}) (interface{}, error) {
+	if l, ok := left.(uint64); ok {
+		if r, ok := right.(uint64); ok {
+			return uintOp(l, r), nil
+		}
+		if r, ok := right.(int64); ok {
+			return intOp(int64(l), r), nil
+		}
+	}
 	if l, ok := left.(int64); ok {
 		if r, ok := right.(int64); ok {
 			return intOp(l, r), nil
 		}
-	}
-	if l, ok := left.(uint64); ok {
 		if r, ok := right.(uint64); ok {
-			return uintOp(l, r), nil
+			return intOp(l, int64(r)), nil
 		}
 	}
 	if l, ok := left.(float64); ok {
@@ -280,6 +286,13 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							}
 							stack = append(stack, result)
 							continue
+						case "|>":
+							val, err := eval(cbor.Tag{Number: TagExpr, Content: []interface{}{right, left, cbor.Tag{Number: TagOp, Content: " "}}}, env)
+							if err != nil {
+								return nil, err
+							}
+							stack = append(stack, val)
+							continue
 						case " ":
 							if tag, ok := left.(cbor.Tag); ok && tag.Number == TagTag {
 								val, err := eval(right, env)
@@ -330,7 +343,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							}
 							return nil, fmt.Errorf("invalid function application")
 						default:
-							return nil, fmt.Errorf("unsupported operator: %v", op)
+							return nil, fmt.Errorf("unimplemented operator: %v", op)
 						}
 					} else {
 						val, err := eval(x, env)
