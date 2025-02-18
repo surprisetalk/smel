@@ -229,7 +229,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							// TODO: For now, just return the expression unevaluated
 							stack = append(stack, cbor.Tag{
 								Number:  TagExpr,
-								Content: []interface{}{left, "++", right},
+								Content: []interface{}{left, right, "++"},
 							})
 							continue
 						case "==":
@@ -285,6 +285,13 @@ func eval(v interface{}, env Env) (interface{}, error) {
 								return nil, err
 							}
 							stack = append(stack, result)
+							continue
+						case "'":
+							val, err := eval(cbor.Tag{Number: TagExpr, Content: []interface{}{left, right, cbor.Tag{Number: TagTag, Content: "pair"}}}, env)
+							if err != nil {
+								return nil, err
+							}
+							stack = append(stack, val)
 							continue
 						case "|>":
 							val, err := eval(cbor.Tag{Number: TagExpr, Content: []interface{}{right, left, cbor.Tag{Number: TagOp, Content: " "}}}, env)

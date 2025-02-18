@@ -16,6 +16,7 @@ var env = make(map[string]interface{})
 
 // TODO: These should go in the scrapyard rather than passed via env.
 func init() {
+
 	files, err := os.ReadDir("./widgets")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error reading widgets directory:", err)
@@ -27,17 +28,12 @@ func init() {
 			continue
 		}
 		filePath := filepath.Join("./widgets", file.Name())
-		content, err := os.ReadFile(filePath)
+		input, err := os.ReadFile(filePath)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error reading file", file.Name()+":", err)
 			continue
 		}
-		m := struct {
-			input string
-		}{
-			input: string(content),
-		}
-		tokens, err := scrapscript.Lex(m.input)
+		tokens, err := scrapscript.Lex(string(input))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error lexing file", file.Name()+":", err)
 			continue
@@ -47,15 +43,39 @@ func init() {
 			fmt.Fprintln(os.Stderr, "error parsing file", file.Name()+":", err)
 			continue
 		}
-		key := strings.TrimSuffix(file.Name(), ".ss")
 		var v interface{}
 		err = cbor.Unmarshal(flat, &v)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error unmarshalling file", file.Name()+":", err)
 			continue
 		}
+		key := strings.TrimSuffix(file.Name(), ".ss")
 		env[key] = v
 	}
+
+	for key, input := range map[string]string{
+		"cmd/none": "cmd::none ()",
+		"cmd/out":  "cmd::out",
+	} {
+		tokens, err := scrapscript.Lex(input)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error lexing", key+":", err)
+			continue
+		}
+		flat, err := scrapscript.Parse(tokens)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error parsing", key+":", err)
+			continue
+		}
+		var v interface{}
+		err = cbor.Unmarshal(flat, &v)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error unmarshalling file", key+":", err)
+			continue
+		}
+		env[key] = v
+	}
+
 }
 
 type model struct {
