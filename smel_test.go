@@ -13,7 +13,7 @@ func TestModel_Update(t *testing.T) {
 	}{
 		{
 			input:  "always (1 + 2 * 3 - 4)",
-			output: "123",
+			output: "3",
 		},
 		{
 			input:  "always 123",

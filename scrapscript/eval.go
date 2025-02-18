@@ -300,7 +300,16 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							}
 							stack = append(stack, val)
 							continue
+						case "::":
+							// TODO: This doesn't work yet.
+							val, err := eval(cbor.Tag{Number: TagTag, Content: right.(cbor.Tag).Content}, env)
+							if err != nil {
+								return nil, err
+							}
+							stack = append(stack, val)
+							continue
 						case " ":
+							// TODO: Need to eval left side first?
 							if tag, ok := left.(cbor.Tag); ok && tag.Number == TagTag {
 								val, err := eval(right, env)
 								if err != nil {
