@@ -16,7 +16,6 @@ var env = make(map[string]interface{})
 
 // TODO: These should go in the scrapyard rather than passed via env.
 func init() {
-
 	files, err := os.ReadDir("./widgets")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error reading widgets directory:", err)
@@ -54,6 +53,7 @@ func init() {
 	}
 
 	for key, input := range map[string]string{
+		"cmd":      "#none () #out ()",
 		"cmd/none": "cmd::none ()",
 		"cmd/out":  "cmd::out",
 	} {
@@ -75,7 +75,6 @@ func init() {
 		}
 		env[key] = v
 	}
-
 }
 
 type model struct {
