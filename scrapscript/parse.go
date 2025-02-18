@@ -385,6 +385,21 @@ func (p *parser) parseBinary(prec float64) ([]Flat, error) {
 			return nil, fmt.Errorf("bad match case")
 		}
 
+		/*
+			if op.Value.(string) == "::" {
+				right := p.next()
+				if right == nil {
+					return nil, fmt.Errorf("bad tag label")
+				}
+				exp, err := cbor.Marshal(cbor.Tag{Number: TagTag, Content: right.Value})
+				if err != nil {
+					return nil, err
+				}
+				exps = append(exps, exp)
+				continue
+			}
+		*/
+
 		right, err := p.parseBinary(opPrec.pr)
 		if err != nil {
 			return nil, err
