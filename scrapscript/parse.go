@@ -6,6 +6,14 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
+var em, cborErr = cbor.CanonicalEncOptions().EncMode()
+
+func init() {
+	if cborErr != nil {
+		panic(cborErr)
+	}
+}
+
 type Flat = cbor.RawMessage
 
 type TagType = uint64
@@ -23,7 +31,7 @@ const (
 
 func tagOp(op string) Flat {
 	// TODO: Do NOT store this as a string! So inefficient.
-	op_, err := cbor.Marshal(cbor.Tag{Number: TagOp, Content: op})
+	op_, err := tag(TagOp, op)
 	if err != nil {
 		panic(err)
 	}
@@ -108,6 +116,10 @@ func (p *parser) next() *Token {
 	return token
 }
 
+func tag(t TagType, content interface{}) (Flat, error) {
+	return em.Marshal(cbor.Tag{Number: t, Content: content})
+}
+
 func value(flat Flat, err error) ([]Flat, error) {
 	return []Flat{flat}, err
 }
@@ -125,45 +137,45 @@ func expr(flats []Flat, err error) (Flat, error) {
 	} else if l == 1 {
 		return flats[0], err
 	}
-	return cbor.Marshal(cbor.Tag{Number: TagExpr, Content: flats})
+	return tag(TagExpr, flats)
 }
 
 // TODO: Use prec?
-func (p *parser) parseUnary(prec float64) ([]Flat, error) {
+func (p *parser) unary(prec float64) ([]Flat, error) {
 	token := p.next()
 	if token == nil {
 		return nil, fmt.Errorf("unexpected end of input")
 	}
-
 	switch token.Type {
 	case TokenIntLit, TokenFloatLit, TokenStringLit, TokenBytesLit:
-		return value(cbor.Marshal(token.Value))
+		return value(em.Marshal(token.Value))
 
 	case TokenName:
-		if token.Value == "true" {
-			return value(cbor.Marshal(true))
+		switch token.Value {
+		case "true":
+			return value(em.Marshal(true))
+		case "false":
+			return value(em.Marshal(false))
+		default:
+			return value(tag(TagVar, token.Value))
 		}
-		if token.Value == "false" {
-			return value(cbor.Marshal(false))
-		}
-		return value(cbor.Marshal(cbor.Tag{Number: TagVar, Content: token.Value}))
 
 	case TokenHash:
-		tag := p.next()
-		if tag == nil {
+		t := p.next()
+		if t == nil {
 			return nil, fmt.Errorf("unexpected end")
 		}
-		if tag.Type != TokenName {
+		if t.Type != TokenName {
 			return nil, fmt.Errorf("expected name after #")
 		}
-		return value(cbor.Marshal(cbor.Tag{Number: TagTag, Content: tag.Value}))
+		return value(tag(TagTag, t.Value))
 
 	case TokenLeftParen:
 		if next := p.peek(); next != nil && next.Type == TokenRightParen {
 			p.next() // consume )
-			return value(cbor.Marshal(nil))
+			return value(em.Marshal(nil))
 		}
-		ex, err := p.parseBinary(0)
+		ex, err := p.binary(0)
 		if err != nil {
 			return nil, err
 		}
@@ -185,7 +197,7 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 					p.next()
 					break
 				}
-				item, err := expr(p.parseBinary(precs[","].pr + 1))
+				item, err := expr(p.binary(precs[","].pr + 1))
 				if err != nil {
 					return nil, err
 				}
@@ -201,7 +213,7 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 				}
 			}
 		}
-		return value(cbor.Marshal(list))
+		return value(em.Marshal(list))
 
 	case TokenLeftBrace:
 		record := make(map[string]Flat)
@@ -215,7 +227,7 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 					break
 				}
 				if next.Type == TokenEtc {
-					v, err := cbor.Marshal(cbor.Tag{Number: TagEtc, Content: ""})
+					v, err := tag(TagEtc, "")
 					if err != nil {
 						return nil, err
 					}
@@ -228,7 +240,7 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 					if next.Type != TokenName {
 						return nil, fmt.Errorf("expected spread variable")
 					}
-					v, err := cbor.Marshal(cbor.Tag{Number: TagEtc, Content: next.Value.(string)})
+					v, err := tag(TagEtc, next.Value.(string))
 					if err != nil {
 						return nil, err
 					}
@@ -240,7 +252,7 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 					k := next.Value.(string)
 					next = p.next()
 					if next.Type == TokenRightBrace || next.Value == "," {
-						v, err := cbor.Marshal(cbor.Tag{Number: TagVar, Content: token.Value})
+						v, err := tag(TagVar, token.Value)
 						if err != nil {
 							return nil, err
 						}
@@ -253,7 +265,7 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 					if next.Type != TokenOperator || next.Value != "=" {
 						return nil, fmt.Errorf("expected = after record key")
 					}
-					v, err := expr(p.parseBinary(precs[","].pr + 1))
+					v, err := expr(p.binary(precs[","].pr + 1))
 					if err != nil {
 						return nil, err
 					}
@@ -270,21 +282,17 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 				}
 			}
 		}
-		em, err := cbor.CanonicalEncOptions().EncMode()
-		if err != nil {
-			return nil, err
-		}
 		return value(em.Marshal(record))
 
 	case TokenEtc:
-		return value(cbor.Marshal(cbor.Tag{Number: TagEtc, Content: ""}))
+		return value(tag(TagEtc, ""))
 
 	case TokenOperator:
 		switch token.Value {
 		case "|":
 			fun := []Flat{}
 			for {
-				x, err := expr(p.parseBinary(precs["->"].pr + 0.2))
+				x, err := expr(p.binary(precs["->"].pr + 0.2))
 				if err != nil {
 					return nil, err
 				}
@@ -292,31 +300,30 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 				if next == nil {
 					return nil, fmt.Errorf("expected ->")
 				}
-				y, err := expr(p.parseBinary(precs["|"].pr + 0.2))
+				y, err := expr(p.binary(precs["|"].pr + 0.2))
 				if err != nil {
 					return nil, err
 				}
 				fun = append(fun, x, y)
-				next = p.peek()
-				if next == nil || next.Type != TokenOperator || next.Value != "|" {
+				if next = p.peek(); next == nil || next.Type != TokenOperator || next.Value != "|" {
 					break
 				}
 				p.next()
 			}
-			return value(cbor.Marshal(cbor.Tag{Number: TagFun, Content: fun}))
+			return value(tag(TagFun, fun))
 		case "-":
 			op := p.peek()
 			switch op.Type {
 			case TokenIntLit:
 				op.Value = -op.Value.(int)
-				return p.parseUnary(highestPrec + 1)
+				return p.unary(highestPrec + 1)
 
 			case TokenFloatLit:
 				op.Value = -op.Value.(float64)
-				return p.parseUnary(highestPrec + 1)
+				return p.unary(highestPrec + 1)
 
 			default:
-				right, err := p.parseUnary(highestPrec + 1)
+				right, err := p.unary(highestPrec + 1)
 				// TODO: 0 - right
 				return right, err
 
@@ -329,15 +336,15 @@ func (p *parser) parseUnary(prec float64) ([]Flat, error) {
 			if next.Type != TokenName {
 				return nil, fmt.Errorf("expected spread variable")
 			}
-			return value(cbor.Marshal(cbor.Tag{Number: TagEtc, Content: next.Value.(string)}))
+			return value(tag(TagEtc, next.Value.(string)))
 		}
 	}
 
 	return nil, fmt.Errorf("unexpected Token %v", token)
 }
 
-func (p *parser) parseBinary(prec float64) ([]Flat, error) {
-	left, err := p.parseUnary(prec)
+func (p *parser) binary(prec float64) ([]Flat, error) {
+	left, err := p.unary(prec)
 	if err != nil {
 		return nil, err
 	}
@@ -348,11 +355,7 @@ func (p *parser) parseBinary(prec float64) ([]Flat, error) {
 	exps := left
 	for {
 		op := p.peek()
-		if op == nil {
-			break
-		}
-
-		if op.Type == TokenRightParen || op.Type == TokenRightBracket || op.Type == TokenRightBrace {
+		if op == nil || op.Type == TokenRightParen || op.Type == TokenRightBracket || op.Type == TokenRightBrace {
 			break
 		}
 
@@ -361,7 +364,7 @@ func (p *parser) parseBinary(prec float64) ([]Flat, error) {
 			if opPrec.pl < prec {
 				break
 			}
-			right, err := p.parseBinary(opPrec.pr)
+			right, err := p.binary(opPrec.pr)
 			if err != nil {
 				return nil, err
 			}
@@ -385,22 +388,7 @@ func (p *parser) parseBinary(prec float64) ([]Flat, error) {
 			return nil, fmt.Errorf("bad match case")
 		}
 
-		/*
-			if op.Value.(string) == "::" {
-				right := p.next()
-				if right == nil {
-					return nil, fmt.Errorf("bad tag label")
-				}
-				exp, err := cbor.Marshal(cbor.Tag{Number: TagTag, Content: right.Value})
-				if err != nil {
-					return nil, err
-				}
-				exps = append(exps, exp)
-				continue
-			}
-		*/
-
-		right, err := p.parseBinary(opPrec.pr)
+		right, err := p.binary(opPrec.pr)
 		if err != nil {
 			return nil, err
 		}
@@ -415,7 +403,7 @@ func (p *parser) parseBinary(prec float64) ([]Flat, error) {
 				return nil, err
 			}
 			// TODO: Shouldn't we be able to do `cbor.Tag{TagFun, []cbor.Tag{{TagExpr, exps}, {TagExpr, right}}}`? It's not working for some reason.
-			exp, err := cbor.Marshal(cbor.Tag{Number: TagFun, Content: []Flat{l, r}})
+			exp, err := tag(TagFun, []Flat{l, r})
 			if err != nil {
 				return nil, err
 			}
@@ -436,7 +424,7 @@ func Parse(Tokens []Token) (Flat, error) {
 	p := &parser{Tokens: Tokens}
 	resetGensym()
 
-	flat, err := expr(p.parseBinary(0))
+	flat, err := expr(p.binary(0))
 	if err != nil {
 		return nil, err
 	}
