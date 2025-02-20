@@ -35,6 +35,7 @@ const (
 	TokenEtc
 )
 
+// TODO: Change this to interface{}. Use lits when possible, or Symbol for everything else.
 type Token struct {
 	Type  TokenType
 	Value interface{}
@@ -69,7 +70,6 @@ func (l *lexer) readWhile(pred func(byte) bool) string {
 	return result.String()
 }
 
-// validOperators contains all valid operators, organized by length for efficient lookup
 var validOperators = struct {
 	len1 map[string]bool
 	len2 map[string]bool
@@ -91,7 +91,6 @@ var validOperators = struct {
 }
 
 func (l *lexer) readOperator() (Token, error) {
-	// Try to read a 3-character operator
 	if l.pos+2 < len(l.text) {
 		op3 := string(l.text[l.pos]) + string(l.text[l.pos+1]) + string(l.text[l.pos+2])
 		if validOperators.len3[op3] {
@@ -102,8 +101,6 @@ func (l *lexer) readOperator() (Token, error) {
 			return Token{Type: TokenOperator, Value: op3}, nil
 		}
 	}
-
-	// Try to read a 2-character operator
 	if l.pos+1 < len(l.text) {
 		op2 := string(l.text[l.pos]) + string(l.text[l.pos+1])
 		if validOperators.len2[op2] {
@@ -111,14 +108,11 @@ func (l *lexer) readOperator() (Token, error) {
 			return Token{Type: TokenOperator, Value: op2}, nil
 		}
 	}
-
-	// Try to read a 1-character operator
 	op1 := string(l.text[l.pos])
 	if validOperators.len1[op1] {
 		l.pos++
 		return Token{Type: TokenOperator, Value: op1}, nil
 	}
-
 	return Token{}, fmt.Errorf("invalid operator: %s", op1)
 }
 

@@ -315,7 +315,7 @@ func (p *parser) unary(prec float64) ([]Flat, error) {
 			op := p.peek()
 			switch op.Type {
 			case TokenIntLit:
-				op.Value = -op.Value.(int)
+				op.Value = -op.Value.(int64)
 				return p.unary(highestPrec + 1)
 
 			case TokenFloatLit:
