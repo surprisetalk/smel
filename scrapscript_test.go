@@ -189,7 +189,7 @@ func TestScrapscript(t *testing.T) {
 		{in: "(a -> b -> a + b) 3 2", eval: "5"},
 		{in: "{a = 1 + 2}", eval: "{ a = 3 }"},
 		{in: `{a = 4}@a`, eval: "4"},
-		{in: `{a = 4}@b`, error: "undefined variable: b"},
+		{in: `{a = 4}@b`, error: "TODO"},
 		{in: "3 < 4", eval: "true"},
 		{in: "3 > 4", eval: "false"},
 		{in: "3 <= 4", eval: "true"},
@@ -204,16 +204,15 @@ func TestScrapscript(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
 			lex, err := scrapscript.Lex(tt.in)
-			if !strings.Contains(err.Error(), tt.error) {
+			if err != nil && !strings.Contains(err.Error(), tt.error) {
 				t.Fatalf("lex error containing %q, got %q", tt.error, err.Error())
 			} else if err != nil {
 				t.Fatalf("lex failed: %v", err)
 				// } else if len(tt.lex) > 0 && tt.lex != lex {
 				// 	t.Errorf("wrong lex\nwant: %#v\ngot:  %#v", tt.lex, lex)
 			}
-
 			parse, err := scrapscript.Parse(lex)
-			if !strings.Contains(err.Error(), tt.error) {
+			if err != nil && !strings.Contains(err.Error(), tt.error) {
 				t.Fatalf("parse error containing %q, got %q", tt.error, err.Error())
 			} else if err != nil {
 				t.Fatalf("parse failed: %v", err)
@@ -222,7 +221,7 @@ func TestScrapscript(t *testing.T) {
 			}
 
 			print, err := scrapscript.Print(parse)
-			if !strings.Contains(err.Error(), tt.error) {
+			if err != nil && !strings.Contains(err.Error(), tt.error) {
 				t.Fatalf("print error containing %q, got %q", tt.error, err.Error())
 			} else if err != nil {
 				t.Fatalf("print failed: %v", err)
@@ -231,13 +230,13 @@ func TestScrapscript(t *testing.T) {
 			}
 
 			eval_, err := scrapscript.Eval(parse, tt.env)
-			if !strings.Contains(err.Error(), tt.error) {
+			if err != nil && !strings.Contains(err.Error(), tt.error) {
 				t.Fatalf("eval error containing %q, got %q", tt.error, err.Error())
 			} else if err != nil {
 				t.Fatalf("eval failed: %v", err)
 			}
 			eval, err := scrapscript.Print(eval_)
-			if !strings.Contains(err.Error(), tt.error) {
+			if err != nil && !strings.Contains(err.Error(), tt.error) {
 				t.Fatalf("eval error containing %q, got %q", tt.error, err.Error())
 			} else if err != nil {
 				t.Fatalf("eval failed: %v", err)

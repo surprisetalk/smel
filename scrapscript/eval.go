@@ -89,7 +89,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 				if val, ok := env[name]; ok {
 					return val, nil
 				}
-				return nil, fmt.Errorf("undefined variable '%v'", name)
+				return nil, fmt.Errorf("undefined variable: %v", name)
 			}
 			return nil, fmt.Errorf("invalid variable name: %v", x.Content)
 
