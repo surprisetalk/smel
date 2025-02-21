@@ -117,15 +117,15 @@ func TestScrapscript(t *testing.T) {
 		{in: "[ ]", print: "[]"},
 		{in: "[]", print: "[]"},
 		{in: "[ 1 , 2 ]", print: "[ 1, 2 ]"},
-		{in: "[ 1 + 2 , 3 + 4 ]", print: "[ 1 + 2, 3 + 4 ]"},
-		{in: "a + 2 . a = 1", print: "a + 2 . a = 1"},
+		{in: "[ 1 + 2 , 3 + 4 ]", print: "[ 1 + 2, 3 + 4 ]", eval: "[ 3, 7 ]"},
+		{in: "a + 2 . a = 1", print: "a + 2 . a = 1", eval: "3"},
 		{in: "a + b . a = 1 . b = 2", print: "a + b . a = 1 . b = 2"},
 		{in: "a + 1 ? a == 1 . a = 1", print: "a + 1 ? a == 1 . a = 1"},
 		{in: "a + b ? a == 1 ? b == 2 . a = 1 . b = 2", print: "a + b ? a == 1 ? b == 2 . a = 1 . b = 2"},
 		{in: "()", print: "()"},
-		{in: "(a -> b -> a + b) 3 2", print: "(a -> b -> a + b) 3 2"},
+		{in: "(a -> b -> a + b) 3 2", print: "(a -> b -> a + b) 3 2", eval: "5"},
 		{in: "(a -> b -> [a, b]) 3 2", print: "(a -> b -> [ a, b ]) 3 2"},
-		{in: "{a = 1 + 3}", print: "{ a = 1 + 3 }"},
+		{in: "{a = 1 + 3}", print: "{ a = 1 + 3 }", eval: "{ a = 4 }"},
 		{in: `rec@b . rec = { a = 1, b = "x" }`, print: `rec@b . rec = { a = 1, b = "x" }`},
 		{in: "xs@1 . xs = [1, 2, 3]", print: "xs@1 . xs = [ 1, 2, 3 ]"},
 		{in: "xs@y . y = 2 . xs = [1, 2, 3]", print: "xs@y . y = 2 . xs = [ 1, 2, 3 ]"},
@@ -186,10 +186,9 @@ func TestScrapscript(t *testing.T) {
 		{in: "[1 + 2, 3 + 4]", eval: "[ 3, 7 ]"},
 		{in: "x -> x", eval: "x -> x"},
 		{in: "(x -> x + 1) 2", eval: "3"},
-		{in: "(a -> b -> a + b) 3 2", eval: "5"},
 		{in: "{a = 1 + 2}", eval: "{ a = 3 }"},
-		{in: `{a = 4}@a`, eval: "4"},
 		{in: `{a = 4}@b`, error: "TODO"},
+		{in: `{a = 4}@a`, eval: "4"},
 		{in: "3 < 4", eval: "true"},
 		{in: "3 > 4", eval: "false"},
 		{in: "3 <= 4", eval: "true"},
@@ -203,6 +202,7 @@ func TestScrapscript(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
+			// t.Log(tt.in)
 			lex, err := scrapscript.Lex(tt.in)
 			if err != nil && !strings.Contains(err.Error(), tt.error) {
 				t.Fatalf("lex error containing %q, got %q", tt.error, err.Error())
