@@ -94,6 +94,17 @@ func print(v interface{}) (string, error) {
 
 				for _, x := range xs {
 					if x_, ok := x.(cbor.Tag); ok && x_.Number == TagOp {
+						if x_.Content.(string) == "#" {
+							if len(s) < 1 {
+								return "", fmt.Errorf("insufficient operands for #")
+							}
+							s[len(s)-1] = struct {
+								text string
+								prec prec
+							}{"#" + s[len(s)-1].text, s[len(s)-1].prec}
+							continue
+						}
+
 						if len(s) < 2 {
 							return "", fmt.Errorf("insufficient operands for operator")
 						}
@@ -185,7 +196,7 @@ func print(v interface{}) (string, error) {
 				return s, nil
 			}
 			return "", fmt.Errorf("non-string operator")
-		case TagVar:
+		case TagSym:
 			if s, ok := x.Content.(string); ok {
 				return s, nil
 			}
@@ -197,13 +208,12 @@ func print(v interface{}) (string, error) {
 			return "", fmt.Errorf("non-string tag")
 		case TagEtc:
 			if s, ok := x.Content.(string); ok {
-				if s == "" {
+				if s == "_" {
 					return "...", nil
-				} else {
-					return ".." + s, nil
 				}
+				return ".." + s, nil
 			}
-			return "", fmt.Errorf("non-string tag")
+			return "", fmt.Errorf("non-string spread")
 		}
 		return "", fmt.Errorf("unsupported cbor tag %v", x.Number)
 	}

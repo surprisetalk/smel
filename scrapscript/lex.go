@@ -19,7 +19,6 @@ type TokenType int
 
 const (
 	TokenEOF TokenType = iota
-	TokenHash
 	TokenLeftParen
 	TokenRightParen
 	TokenLeftBrace
@@ -35,7 +34,7 @@ const (
 	TokenEtc
 )
 
-// TODO: Change this to interface{}. Use lits when possible, or Symbol for everything else.
+// TODO: Change this to interface{}. Use lits when possible, or TagOp / TagSym for everything else.
 type Token struct {
 	Type  TokenType
 	Value interface{}
@@ -78,7 +77,7 @@ var validOperators = struct {
 	len1: map[string]bool{
 		"+": true, "-": true, "*": true, "/": true, "^": true, "%": true,
 		"<": true, ">": true, "!": true, ".": true, "=": true, ",": true,
-		":": true, "?": true, "|": true, "@": true, "'": true, ";": true,
+		":": true, "?": true, "|": true, "@": true, "'": true, ";": true, "#": true,
 	},
 	len2: map[string]bool{
 		"++": true, "+<": true, ">+": true, "==": true, "/=": true, "<=": true,
@@ -208,7 +207,7 @@ func (l *lexer) nextToken() (Token, error) {
 
 	case c == '#':
 		l.advance()
-		return Token{Type: TokenHash, Value: "#"}, nil
+		return Token{Type: TokenOperator, Value: "#"}, nil
 	case c == '~':
 		l.advance()
 		if l.hasInput() && l.peek() == '~' {

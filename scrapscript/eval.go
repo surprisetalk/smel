@@ -81,10 +81,10 @@ func eval(v interface{}, env Env) (interface{}, error) {
 
 	case cbor.Tag:
 		switch x.Number {
-		case TagFun, TagTag:
+		case TagFun, TagType, TagTag:
 			return x, nil
 
-		case TagVar:
+		case TagSym:
 			if name, ok := x.Content.(string); ok {
 				if val, ok := env[name]; ok {
 					return val, nil
@@ -287,7 +287,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							stack = append(stack, result)
 							continue
 						case "'":
-							val, err := eval(cbor.Tag{Number: TagExpr, Content: []interface{}{left, right, cbor.Tag{Number: TagTag, Content: "pair"}}}, env)
+							val, err := eval(cbor.Tag{Number: TagExpr, Content: []interface{}{left, right, cbor.Tag{Number: TagSym, Content: "pair"}}}, env)
 							if err != nil {
 								return nil, err
 							}
@@ -300,9 +300,9 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							}
 							stack = append(stack, val)
 							continue
-						case "::":
-							stack = append(stack, cbor.Tag{Number: TagTag, Content: right.(cbor.Tag).Content})
-							continue
+						// case "::":
+						// 	stack = append(stack, cbor.Tag{Number: TagTag, Content: right.(cbor.Tag).Content})
+						// 	continue
 						case " ":
 							l, err := eval(left, env)
 							if err != nil {
@@ -340,7 +340,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 										newEnv[k] = v
 									}
 
-									if pat, ok := pattern.(cbor.Tag); ok && pat.Number == TagVar {
+									if pat, ok := pattern.(cbor.Tag); ok && pat.Number == TagSym {
 										newEnv[pat.Content.(string)] = right
 										result, err := eval(body, newEnv)
 										if err != nil {
@@ -361,11 +361,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							return nil, fmt.Errorf("unimplemented operator: %v", op)
 						}
 					} else {
-						val, err := eval(x, env)
-						if err != nil {
-							return nil, err
-						}
-						stack = append(stack, val)
+						stack = append(stack, x)
 					}
 				}
 

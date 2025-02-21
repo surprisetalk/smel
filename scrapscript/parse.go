@@ -16,17 +16,17 @@ func init() {
 
 type Flat = cbor.RawMessage
 
-type TagType = uint64
+type TagN = uint64
 
 const (
-	TagExpr TagType = ' '
-	TagOp   TagType = '+'
-	TagVar  TagType = '='
-	TagTag  TagType = '#'
-	TagSnap TagType = '\\'
-	TagDict TagType = '\''
-	TagFun  TagType = '|'
-	TagEtc  TagType = '.'
+	TagExpr TagN = ' '
+	TagOp   TagN = '+'
+	TagSym  TagN = '='
+	TagTag  TagN = '#'
+	TagEtc  TagN = '.'
+	TagFun  TagN = '|'  // e.g. | a -> 0 | _ -> 1
+	TagDict TagN = '\'' // e.g. dict/from [ "a"' 1, "b"' 1 ]
+	TagType TagN = ':'  // e.g. #a int #b int
 )
 
 func tagOp(op string) Flat {
@@ -71,7 +71,7 @@ var precs = map[string]prec{
 	"||": {7, 7.1},
 	"'":  {6.5, 6.4},
 	"|>": {6, 6.1},
-	"#":  {5.5, 5.4},
+	"#":  {5.5, 2000}, // TODO: This should bind tighter than " " on one side? So that (#a #b) and (#a () #b ()) both work?
 	"->": {5, 4.9},
 	"|":  {4.5, 4.6},
 	":":  {4.5, 4.4},
@@ -116,7 +116,7 @@ func (p *parser) next() *Token {
 	return token
 }
 
-func tag(t TagType, content interface{}) (Flat, error) {
+func tag(t TagN, content interface{}) (Flat, error) {
 	return em.Marshal(cbor.Tag{Number: t, Content: content})
 }
 
@@ -157,18 +157,8 @@ func (p *parser) unary(prec float64) ([]Flat, error) {
 		case "false":
 			return value(em.Marshal(false))
 		default:
-			return value(tag(TagVar, token.Value))
+			return value(tag(TagSym, token.Value))
 		}
-
-	case TokenHash:
-		t := p.next()
-		if t == nil {
-			return nil, fmt.Errorf("unexpected end")
-		}
-		if t.Type != TokenName {
-			return nil, fmt.Errorf("expected name after #")
-		}
-		return value(tag(TagTag, t.Value))
 
 	case TokenLeftParen:
 		if next := p.peek(); next != nil && next.Type == TokenRightParen {
@@ -227,7 +217,7 @@ func (p *parser) unary(prec float64) ([]Flat, error) {
 					break
 				}
 				if next.Type == TokenEtc {
-					v, err := tag(TagEtc, "")
+					v, err := tag(TagSym, "_")
 					if err != nil {
 						return nil, err
 					}
@@ -252,7 +242,7 @@ func (p *parser) unary(prec float64) ([]Flat, error) {
 					k := next.Value.(string)
 					next = p.next()
 					if next.Type == TokenRightBrace || next.Value == "," {
-						v, err := tag(TagVar, token.Value)
+						v, err := tag(TagSym, token.Value)
 						if err != nil {
 							return nil, err
 						}
@@ -285,7 +275,7 @@ func (p *parser) unary(prec float64) ([]Flat, error) {
 		return value(em.Marshal(record))
 
 	case TokenEtc:
-		return value(tag(TagEtc, ""))
+		return value(tag(TagEtc, "_"))
 
 	case TokenOperator:
 		switch token.Value {
@@ -328,15 +318,15 @@ func (p *parser) unary(prec float64) ([]Flat, error) {
 				return right, err
 
 			}
-		case "..":
+		case "#":
 			next := p.next()
 			if next == nil {
-				return nil, fmt.Errorf("unexpected end during spread")
+				return nil, fmt.Errorf("unexpected end during tag")
 			}
 			if next.Type != TokenName {
-				return nil, fmt.Errorf("expected spread variable")
+				return nil, fmt.Errorf("expected tag name")
 			}
-			return value(tag(TagEtc, next.Value.(string)))
+			return value(tag(TagTag, next.Value.(string)))
 		}
 	}
 
@@ -381,7 +371,7 @@ func (p *parser) binary(prec float64) ([]Flat, error) {
 		// TODO: Look for more parse errors here.
 		switch op.Value {
 		case "=":
-			if TagType(left[0][0]) == TagVar {
+			if TagN(left[0][0]) == TagSym {
 				return nil, fmt.Errorf("expected variable name before =")
 			}
 		case "|":
