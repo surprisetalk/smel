@@ -275,7 +275,11 @@ func (p *parser) unary(prec float64) ([]Flat, error) {
 		return value(em.Marshal(record))
 
 	case TokenEtc:
-		return value(tag(TagEtc, "_"))
+		v, err := value(tag(TagSym, "_"))
+		if err != nil {
+			return nil, err
+		}
+		return value(tag(TagEtc, v))
 
 	case TokenOperator:
 		switch token.Value {
