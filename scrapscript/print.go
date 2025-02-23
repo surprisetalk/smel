@@ -207,13 +207,17 @@ func print(v interface{}) (string, error) {
 			}
 			return "", fmt.Errorf("non-string tag")
 		case TagEtc:
-			if s, ok := x.Content.(string); ok {
-				if s == "_" {
+			if s, ok := x.Content.(cbor.Tag); ok && s.Number == TagSym {
+				if s.Content == "_" {
 					return "...", nil
 				}
-				return ".." + s, nil
+				return ".." + s.Content.(string), nil
 			}
-			return "", fmt.Errorf("non-string spread")
+			s, err := print(x.Content)
+			if err != nil {
+				return "", err
+			}
+			return ".. " + s, nil
 		}
 		return "", fmt.Errorf("unsupported cbor tag %v", x.Number)
 	}

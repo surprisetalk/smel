@@ -223,14 +223,14 @@ func (p *parser) unary(prec float64) ([]Flat, error) {
 					}
 					record[""] = v
 				} else if next.Type == TokenOperator && next.Value == ".." {
-					next := p.next()
-					if next == nil {
+					if p.peek() == nil {
 						return nil, fmt.Errorf("unexpected end during spread")
 					}
-					if next.Type != TokenName {
-						return nil, fmt.Errorf("expected spread variable")
+					next, err := expr(p.unary(prec))
+					if err != nil {
+						return nil, err
 					}
-					v, err := tag(TagEtc, next.Value.(string))
+					v, err := tag(TagEtc, next)
 					if err != nil {
 						return nil, err
 					}
