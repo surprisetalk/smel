@@ -109,6 +109,12 @@ func eval(v interface{}, env Env) (interface{}, error) {
 
 						op := tag.Content.(string)
 						switch op {
+						case "@":
+							if rec, ok := left.(map[interface{}]interface{}); ok {
+								stack = append(stack, rec[right.(cbor.Tag).Content.(string)])
+								continue
+							}
+							return nil, fmt.Errorf("cannot access key from non-record: %v", left)
 						case "+":
 							result, err := numOp(left, right,
 								func(a, b int64) interface{} { return a + b },
