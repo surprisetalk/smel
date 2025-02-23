@@ -6,6 +6,22 @@ import (
 	"testing"
 )
 
+// Returns true if test contains expected error and is complete.
+func checkTest(k string, t *testing.T, expectedError string, err error) bool {
+	if err != nil {
+		if expectedError != "" {
+			if strings.Contains(err.Error(), expectedError) {
+				return true
+			} else {
+				t.Fatalf("%s error containing %q, got %q", k, expectedError, err.Error())
+			}
+		} else {
+			t.Fatalf("%s failed: %v", k, err)
+		}
+	}
+	return false
+}
+
 func TestScrapscript(t *testing.T) {
 	tests := []struct {
 		in string
@@ -173,21 +189,21 @@ func TestScrapscript(t *testing.T) {
 		{in: "2 * 3", eval: "6"},
 		// {in: "3 / 9", eval: "0.3"},
 		{in: "2 ^ 3", eval: "8"},
-		{in: `[] ++ []`, eval: `[] ++ []`},
+		{in: `[] ++ []`, eval: `[]`},
 		{in: "10 % 4", eval: "2"},
 		{in: "1 == 1", eval: "true"},
 		{in: "1 == 2", eval: "false"},
 		{in: "1 /= 1", eval: "false"},
 		{in: "1 /= 2", eval: "true"},
 		{in: `"hello" ++ " world"`, eval: `"hello world"`},
-		{in: `123 ++ " world"`, error: "eval String, got Int"},
+		{in: `123 ++ " world"`, error: "expected list"},
 		{in: "1 >+ [2, 3]", eval: "[ 1, 2, 3 ]"},
 		{in: "[1, 2] +< 3", eval: "[ 1, 2, 3 ]"},
 		{in: "[1 + 2, 3 + 4]", eval: "[ 3, 7 ]"},
 		{in: "x -> x", eval: "x -> x"},
 		{in: "(x -> x + 1) 2", eval: "3"},
 		{in: "{a = 1 + 2}", eval: "{ a = 3 }"},
-		{in: `{a = 4}@b`, error: "TODO"},
+		{in: `{a = 4}@b`, eval: "()"},
 		{in: `{a = 4}@a`, eval: "4"},
 		{in: "3 < 4", eval: "true"},
 		{in: "3 > 4", eval: "false"},
@@ -202,46 +218,36 @@ func TestScrapscript(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.in, func(t *testing.T) {
-			// t.Log(tt.in)
 			lex, err := scrapscript.Lex(tt.in)
-			if err != nil && !strings.Contains(err.Error(), tt.error) {
-				t.Fatalf("lex error containing %q, got %q", tt.error, err.Error())
-			} else if err != nil {
-				t.Fatalf("lex failed: %v", err)
-				// } else if len(tt.lex) > 0 && tt.lex != lex {
-				// 	t.Errorf("wrong lex\nwant: %#v\ngot:  %#v", tt.lex, lex)
+			if checkTest("lex", t, tt.error, err) {
+				return
 			}
+
 			parse, err := scrapscript.Parse(lex)
-			if err != nil && !strings.Contains(err.Error(), tt.error) {
-				t.Fatalf("parse error containing %q, got %q", tt.error, err.Error())
-			} else if err != nil {
-				t.Fatalf("parse failed: %v", err)
-				// } else if tt.parse != nil && tt.parse != parse {
-				// t.Errorf("wrong parse\nwant: %#v\ngot:  %#v", tt.parse, parse)
+			if checkTest("parse", t, tt.error, err) {
+				return
 			}
 
 			print, err := scrapscript.Print(parse)
-			if err != nil && !strings.Contains(err.Error(), tt.error) {
-				t.Fatalf("print error containing %q, got %q", tt.error, err.Error())
-			} else if err != nil {
-				t.Fatalf("print failed: %v", err)
+			if checkTest("parse", t, tt.error, err) {
+				return
 			} else if tt.print != "" && tt.print != print {
 				t.Errorf("wrong print\nwant: %#v\ngot:  %#v", tt.print, print)
 			}
 
 			eval_, err := scrapscript.Eval(parse, tt.env)
-			if err != nil && !strings.Contains(err.Error(), tt.error) {
-				t.Fatalf("eval error containing %q, got %q", tt.error, err.Error())
-			} else if err != nil {
-				t.Fatalf("eval failed: %v", err)
+			if checkTest("eval", t, tt.error, err) {
+				return
 			}
 			eval, err := scrapscript.Print(eval_)
-			if err != nil && !strings.Contains(err.Error(), tt.error) {
-				t.Fatalf("eval error containing %q, got %q", tt.error, err.Error())
-			} else if err != nil {
-				t.Fatalf("eval failed: %v", err)
+			if checkTest("eval", t, tt.error, err) {
+				return
 			} else if tt.eval != "" && tt.eval != eval {
 				t.Errorf("wrong eval\nwant: %#v\ngot:  %#v", tt.eval, eval)
+			}
+
+			if tt.error != "" {
+				t.Errorf("expected error: %v", tt.error)
 			}
 		})
 	}

@@ -3,6 +3,7 @@ package scrapscript
 import (
 	"fmt"
 	"math"
+	"slices"
 
 	"github.com/fxamacker/cbor/v2"
 )
@@ -39,13 +40,6 @@ func asBool(v interface{}) (bool, error) {
 		return b, nil
 	}
 	return false, fmt.Errorf("expected boolean, got %T", v)
-}
-
-func asList(v interface{}) ([]interface{}, error) {
-	if l, ok := v.([]interface{}); ok {
-		return l, nil
-	}
-	return nil, fmt.Errorf("expected list, got %T", v)
 }
 
 func eval(v interface{}, env Env) (interface{}, error) {
@@ -103,11 +97,27 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							return nil, fmt.Errorf("insufficient operands for operator '%v' (need 2, have %d)", tag.Content, len(stack))
 						}
 
+						op := tag.Content.(string)
+
 						right := stack[len(stack)-1]
+						if !slices.Contains([]string{"@", "::"}, op) {
+							r, err := eval(right, env)
+							if err != nil {
+								return nil, err
+							}
+							right = r
+						}
+
 						left := stack[len(stack)-2]
+						if !slices.Contains([]string{"="}, op) {
+							l, err := eval(left, env)
+							if err != nil {
+								return nil, err
+							}
+							left = l
+						}
 						stack = stack[:len(stack)-2]
 
-						op := tag.Content.(string)
 						switch op {
 						case "@":
 							if rec, ok := left.(map[interface{}]interface{}); ok {
@@ -225,19 +235,31 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							stack = append(stack, l || r)
 							continue
 						case ">+":
-							r, err := asList(right)
-							if err != nil {
-								return nil, err
+							if r, ok := right.([]interface{}); ok {
+								stack = append(stack, append([]interface{}{left}, r...))
+								continue
 							}
-							stack = append(stack, append([]interface{}{left}, r...))
-							continue
+							return nil, fmt.Errorf("expected list, got %T", right)
+						case "+<":
+							if l, ok := left.([]interface{}); ok {
+								stack = append(stack, append(l, right))
+								continue
+							}
+							return nil, fmt.Errorf("expected list, got %T", left)
 						case "++":
-							// TODO: For now, just return the expression unevaluated
-							stack = append(stack, cbor.Tag{
-								Number:  TagExpr,
-								Content: []interface{}{left, right, "++"},
-							})
-							continue
+							if l, ok := left.(string); ok {
+								if r, ok := right.(string); ok {
+									stack = append(stack, l+r)
+									continue
+								}
+							}
+							if l, ok := left.([]interface{}); ok {
+								if r, ok := right.([]interface{}); ok {
+									stack = append(stack, append(l, r...))
+									continue
+								}
+							}
+							return nil, fmt.Errorf("expected lists or texts, got %T and %T", left, right)
 						case "==":
 							// TODO: Compare as bytes.
 							stack = append(stack, left == right)
