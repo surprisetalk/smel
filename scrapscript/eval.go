@@ -109,7 +109,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 						}
 
 						left := stack[len(stack)-2]
-						if !slices.Contains([]string{"="}, op) {
+						if !slices.Contains([]string{"=", "."}, op) {
 							l, err := eval(left, env)
 							if err != nil {
 								return nil, err
