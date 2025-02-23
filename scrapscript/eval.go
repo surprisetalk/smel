@@ -75,7 +75,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 
 	case cbor.Tag:
 		switch x.Number {
-		case TagFun, TagType, TagTag:
+		case TagFun, TagType, TagTag, TagEtc:
 			return x, nil
 
 		case TagSym:

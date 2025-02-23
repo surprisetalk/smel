@@ -189,25 +189,25 @@ func TestScrapscript(t *testing.T) {
 		{in: "a . b"},
 		{in: "a->b->a+b"},
 		{in: "a -> b -> a + b"},
-		{in: "-- ", error: "TODO"},
+		{in: "-- ", error: "empty input"},
 		// {in: "- ", error: "TODO"},
 		{in: "..."},
-		{in: ".."},
-		{in: "$$bills", error: "TODO"},
+		{in: "..", error: "unexpected Token"},
+		{in: "$$bills", error: "undefined variable"},
 		{in: "1-2"},
-		{in: ",:", error: "TODO"},
+		{in: ",:", error: "unexpected Token"},
 		{in: "-- 1\n2"},
 		{in: "1\n+\t2"},
 		{in: "[1,2]"},
 		{in: "[]"},
-		{in: "$sha1'foo"},
-		{in: "abc"},
-		{in: `"hello`},
+		{in: "$sha1'foo", error: "undefined variable"},
+		{in: "abc", error: "undefined variable"},
+		{in: `"hello`, error: "unterminated"},
 		{in: `"hello world"`},
 		{in: `"hello"`},
 		{in: "1+2"},
 		{in: "1 + 2"},
-		{in: "1.0.1"},
+		{in: "1.0.1", error: "unexpected character"},
 		{in: "10."},
 		{in: "-3.14"},
 		{in: "3.14"},
@@ -229,7 +229,7 @@ func TestScrapscript(t *testing.T) {
 			}
 
 			print, err := scrapscript.Print(parse)
-			if checkTest("parse", t, tt.error, err) {
+			if checkTest("print", t, tt.error, err) {
 				return
 			} else if tt.print != "" && tt.print != print {
 				t.Errorf("wrong print\nwant: %#v\ngot:  %#v", tt.print, print)
