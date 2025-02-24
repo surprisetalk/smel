@@ -91,6 +91,7 @@ func print(v interface{}) (string, error) {
 					text string
 					prec prec
 				}{}
+				suffix := ""
 
 				for _, x := range xs {
 					if x_, ok := x.(cbor.Tag); ok && x_.Number == TagOp {
@@ -158,7 +159,7 @@ func print(v interface{}) (string, error) {
 				if len(s) != 1 {
 					return "", fmt.Errorf("invalid expression: too many operands")
 				}
-				return s[0].text, nil
+				return s[0].text + suffix, nil
 			}
 			return "", fmt.Errorf("expected list of flats: %v", x.Content)
 		case TagFun:

@@ -1,9 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"smel/scrapscript"
 	"strings"
 	"testing"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
 // Returns true if test contains expected error and is complete.
@@ -26,7 +29,7 @@ func TestScrapscript(t *testing.T) {
 	tests := []struct {
 		in string
 		// lex   []string
-		parse scrapscript.Flat
+		parse string
 		print string
 		eval  string
 		error string
@@ -179,7 +182,7 @@ func TestScrapscript(t *testing.T) {
 		{in: "1 |> f . f = a -> a + 1"},
 		{in: "g . g = | 1 -> 2 | 2 -> 3"},
 		// {in: "a!b"},
-		{in: "r@a . r = { a = 1 }", print: "r@a . r = { a = 1 }", eval: "1"},
+		{in: "r@a . r = { a = 1 }", parse: "{32 [{32 [{61 r} {61 a} {43 @}]} {32 [{61 r} map[a:1] {43 =}]} {43 .}]}", print: "r@a . r = { a = 1 }", eval: "1"},
 		{in: "123 -> {x=1,..{}}", print: "123 -> { .. {}, x = 1 }"},
 		{in: "123 -> { x = 1, ..{} }", print: "123 -> { .. {}, x = 1 }"},
 		{in: "a -> {x=1,..a}", print: "a -> { ..a, x = 1 }"},
@@ -228,8 +231,13 @@ func TestScrapscript(t *testing.T) {
 			}
 
 			parse, err := scrapscript.Parse(lex)
+			var v interface{}
+			cbor.Unmarshal(parse, &v)
+			parse_ := fmt.Sprintf("%v", v)
 			if checkTest("parse", t, tt.error, err) {
 				return
+			} else if tt.parse != "" && tt.parse != parse_ {
+				t.Errorf("wrong parse\nwant: %#v\ngot:  %#v", tt.parse, parse_)
 			}
 
 			print, err := scrapscript.Print(parse)

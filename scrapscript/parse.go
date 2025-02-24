@@ -18,6 +18,7 @@ type Flat = cbor.RawMessage
 
 type TagN = uint64
 
+// TODO: Consider adding a TagExbr (backwards expr) for efficiency reasons, i.e. loading assignments into memory early.
 const (
 	TagExpr TagN = ' '
 	TagOp   TagN = '+'
@@ -76,9 +77,9 @@ var precs = map[string]prec{
 	"|":  {4.5, 4.6},
 	":":  {4.5, 4.4},
 	"=":  {4, 4.1},
-	"!":  {3, 2.9},
-	".":  {3, 3.1},
 	"?":  {3, 3.1},
+	"!":  {2, 1.9},
+	".":  {1, 1.1},
 	// ",":  {1, 0},
 }
 
@@ -398,6 +399,20 @@ func (p *parser) binary(prec float64) ([]Flat, error) {
 			}
 			// TODO: Shouldn't we be able to do `cbor.Tag{TagFun, []cbor.Tag{{TagExpr, exps}, {TagExpr, right}}}`? It's not working for some reason.
 			exp, err := tag(TagFun, []Flat{l, r})
+			if err != nil {
+				return nil, err
+			}
+			exps = []Flat{exp}
+		} else if op.Value.(string) == "." {
+			l, err := expr(exps, nil)
+			if err != nil {
+				return nil, err
+			}
+			r, err := expr(right, nil)
+			if err != nil {
+				return nil, err
+			}
+			exp, err := tag(TagExpr, []Flat{l, r, tagOp(op.Value.(string))})
 			if err != nil {
 				return nil, err
 			}
