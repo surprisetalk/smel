@@ -119,6 +119,12 @@ func eval(v interface{}, env Env) (interface{}, error) {
 						stack = stack[:len(stack)-2]
 
 						switch op {
+						case "=":
+							if pat, ok := left.(cbor.Tag); env != nil && ok && pat.Number == TagSym {
+								env[pat.Content.(string)] = right
+								continue
+							}
+							return nil, fmt.Errorf("cannot assign %v = %v", left, right)
 						case "@":
 							if rec, ok := left.(map[interface{}]interface{}); ok {
 								stack = append(stack, rec[right.(cbor.Tag).Content.(string)])
