@@ -120,6 +120,12 @@ func print(v interface{}) (string, error) {
 						left := s[len(s)-2]
 						s = s[:len(s)-2]
 
+						if op == "." {
+							tmp := right
+							right = left
+							left = tmp
+						}
+
 						opStr := op
 						if op != " " {
 							if !slices.Contains([]string{"::", "@", "^", "*", "/", "//", " "}, op) || left.prec.pr < pp.pl || left.prec.pl == precs[" "].pl || right.prec.pl == precs[" "].pl {
@@ -144,6 +150,15 @@ func print(v interface{}) (string, error) {
 							leftStr + opStr + rightStr,
 							pp,
 						})
+					} else if x_, ok := x.(cbor.Tag); ok && x_.Number == TagFun {
+						text, err := print(x)
+						if err != nil {
+							return "", err
+						}
+						s = append(s, struct {
+							text string
+							prec prec
+						}{text, prec{5, 4.9}})
 					} else {
 						text, err := print(x)
 						if err != nil {

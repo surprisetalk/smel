@@ -404,19 +404,7 @@ func (p *parser) binary(prec float64) ([]Flat, error) {
 			}
 			exps = []Flat{exp}
 		} else if op.Value.(string) == "." {
-			l, err := expr(exps, nil)
-			if err != nil {
-				return nil, err
-			}
-			r, err := expr(right, nil)
-			if err != nil {
-				return nil, err
-			}
-			exp, err := tag(TagExpr, []Flat{l, r, tagOp(op.Value.(string))})
-			if err != nil {
-				return nil, err
-			}
-			exps = []Flat{exp}
+			exps = append(right, append(exps, tagOp(op.Value.(string)))...)
 		} else {
 			exps = append(exps, append(right, tagOp(op.Value.(string)))...)
 		}

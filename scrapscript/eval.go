@@ -45,6 +45,9 @@ func asBool(v interface{}) (bool, error) {
 func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 	switch op {
 	case ".":
+		if right != nil {
+			return nil, fmt.Errorf("expected env, got %v", right)
+		}
 		return left, nil
 	case "=":
 		if pat, ok := left.(cbor.Tag); ok && pat.Number == TagSym {
@@ -361,7 +364,16 @@ func eval(v interface{}, env Env) (interface{}, error) {
 						op := tag.Content.(string)
 
 						right := stack[len(stack)-1]
-						if !slices.Contains([]string{"@", "::"}, op) {
+						left := stack[len(stack)-2]
+						stack = stack[:len(stack)-2]
+
+						if op == "." {
+							tmp := right
+							right = left
+							left = tmp
+						}
+
+						if !slices.Contains([]string{"=", "@", "::"}, op) {
 							r, err := eval(right, env)
 							if err != nil {
 								return nil, err
@@ -369,8 +381,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							right = r
 						}
 
-						left := stack[len(stack)-2]
-						if !slices.Contains([]string{"=", "."}, op) {
+						if !slices.Contains([]string{"="}, op) {
 							l, err := eval(left, env)
 							if err != nil {
 								return nil, err
@@ -378,13 +389,13 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							left = l
 						}
 
-						stack = stack[:len(stack)-2]
-
 						res, err := applyOp(op, left, right, env)
 						if err != nil {
 							return nil, err
 						}
+
 						stack = append(stack, res)
+
 					} else {
 						stack = append(stack, x)
 					}
