@@ -47,6 +47,10 @@ func eval(v interface{}, env Env) (interface{}, error) {
 		return nil, nil
 	}
 
+	if env == nil {
+		env = make(Env)
+	}
+
 	switch x := v.(type) {
 	case bool, uint64, int64, float64, []byte, string:
 		return x, nil
@@ -119,9 +123,16 @@ func eval(v interface{}, env Env) (interface{}, error) {
 						stack = stack[:len(stack)-2]
 
 						switch op {
+						case ".":
+							stack = append(stack, left)
+							continue
 						case "=":
-							if pat, ok := left.(cbor.Tag); env != nil && ok && pat.Number == TagSym {
+							if pat, ok := left.(cbor.Tag); ok && pat.Number == TagSym {
+								if env == nil {
+									return nil, fmt.Errorf("cannot assign to variable %v (no environment)", pat.Content)
+								}
 								env[pat.Content.(string)] = right
+								stack = append(stack, nil)
 								continue
 							}
 							return nil, fmt.Errorf("cannot assign %v = %v", left, right)
