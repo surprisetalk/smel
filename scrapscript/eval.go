@@ -42,6 +42,256 @@ func asBool(v interface{}) (bool, error) {
 	return false, fmt.Errorf("expected boolean, got %T", v)
 }
 
+func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
+	switch op {
+	case ".":
+		return left, nil
+	case "=":
+		if pat, ok := left.(cbor.Tag); ok && pat.Number == TagSym {
+			if env == nil {
+				return nil, fmt.Errorf("cannot assign to variable %v (no environment)", pat.Content)
+			}
+			env[pat.Content.(string)] = right
+			return nil, nil
+		}
+		return nil, fmt.Errorf("cannot assign %v = %v", left, right)
+	case "@":
+		if rec, ok := left.(map[interface{}]interface{}); ok {
+			return rec[right.(cbor.Tag).Content.(string)], nil
+		}
+		return nil, fmt.Errorf("cannot access key from non-record: %v", left)
+	case "+":
+		result, err := numOp(left, right,
+			func(a, b int64) interface{} { return a + b },
+			func(a, b uint64) interface{} { return a + b },
+			func(a, b float64) interface{} { return a + b })
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	case "-":
+		result, err := numOp(left, right,
+			func(a, b int64) interface{} { return a - b },
+			func(a, b uint64) interface{} { return int64(a) - int64(b) },
+			func(a, b float64) interface{} { return a - b })
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	case "*":
+		result, err := numOp(left, right,
+			func(a, b int64) interface{} { return a * b },
+			func(a, b uint64) interface{} { return int64(a) * int64(b) },
+			func(a, b float64) interface{} { return a * b })
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	case "/":
+		result, err := numOp(left, right,
+			func(a, b int64) interface{} {
+				return fmt.Errorf("division not supported for integers")
+			},
+			func(a, b uint64) interface{} {
+				return fmt.Errorf("division not supported for integers")
+			},
+			func(a, b float64) interface{} {
+				if b == 0 {
+					return fmt.Errorf("division by zero")
+				}
+				return a / b
+			})
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	case "%":
+		result, err := numOp(left, right,
+			func(a, b int64) interface{} {
+				if b == 0 {
+					return fmt.Errorf("modulo by zero")
+				}
+				return a % b
+			},
+			func(a, b uint64) interface{} {
+				if b == 0 {
+					return fmt.Errorf("modulo by zero")
+				}
+				return a % b
+			},
+			func(a, b float64) interface{} {
+				return fmt.Errorf("modulo not supported for floats")
+			})
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	case "^":
+		result, err := numOp(left, right,
+			func(a, b int64) interface{} {
+				return int64(math.Pow(float64(a), float64(b)))
+			},
+			func(a, b uint64) interface{} {
+				return uint64(math.Pow(float64(a), float64(b)))
+			},
+			func(a, b float64) interface{} {
+				return math.Pow(a, b)
+			})
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	case "&&":
+		l, err := asBool(left)
+		if err != nil {
+			return nil, err
+		}
+		r, err := asBool(right)
+		if err != nil {
+			return nil, err
+		}
+		return l && r, nil
+	case "||":
+		l, err := asBool(left)
+		if err != nil {
+			return nil, err
+		}
+		r, err := asBool(right)
+		if err != nil {
+			return nil, err
+		}
+		return l || r, nil
+	case ">+":
+		if r, ok := right.([]interface{}); ok {
+			return append([]interface{}{left}, r...), nil
+		}
+		return nil, fmt.Errorf("expected list, got %T", right)
+	case "+<":
+		if l, ok := left.([]interface{}); ok {
+			return append(l, right), nil
+		}
+		return nil, fmt.Errorf("expected list, got %T", left)
+	case "++":
+		if l, ok := left.(string); ok {
+			if r, ok := right.(string); ok {
+				return l + r, nil
+			}
+		}
+		if l, ok := left.([]interface{}); ok {
+			if r, ok := right.([]interface{}); ok {
+				return append(l, r...), nil
+			}
+		}
+		return nil, fmt.Errorf("expected lists or texts, got %T and %T", left, right)
+	case "==":
+		// TODO: Compare as bytes.
+		return left == right, nil
+	case "/=":
+		// TODO: Compare as bytes.
+		return left != right, nil
+	case "<", ">", "<=", ">=":
+		result, err := numOp(left, right,
+			func(a, b int64) interface{} {
+				switch op {
+				case "<":
+					return a < b
+				case ">":
+					return a > b
+				case "<=":
+					return a <= b
+				case ">=":
+					return a >= b
+				}
+				return nil
+			},
+			func(a, b uint64) interface{} {
+				switch op {
+				case "<":
+					return a < b
+				case ">":
+					return a > b
+				case "<=":
+					return a <= b
+				case ">=":
+					return a >= b
+				}
+				return nil
+			},
+			func(a, b float64) interface{} {
+				switch op {
+				case "<":
+					return a < b
+				case ">":
+					return a > b
+				case "<=":
+					return a <= b
+				case ">=":
+					return a >= b
+				}
+				return nil
+			})
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	case "'":
+		val, err := eval(cbor.Tag{Number: TagExpr, Content: []interface{}{left, right, cbor.Tag{Number: TagSym, Content: "pair"}}}, env)
+		if err != nil {
+			return nil, err
+		}
+		return val, nil
+	case "|>":
+		val, err := eval(cbor.Tag{Number: TagExpr, Content: []interface{}{right, left, cbor.Tag{Number: TagOp, Content: " "}}}, env)
+		if err != nil {
+			return nil, err
+		}
+		return val, nil
+	case "::":
+		return cbor.Tag{Number: TagTag, Content: right.(cbor.Tag).Content}, nil
+	case " ":
+		if tag, ok := left.(cbor.Tag); ok && tag.Number == TagTag {
+			if tag.Content == "true" && right == nil {
+				return true, nil
+			}
+			if tag.Content == "false" && right == nil {
+				return false, nil
+			}
+			return cbor.Tag{Number: TagExpr, Content: []interface{}{tag, right, cbor.Tag{Number: TagOp, Content: " "}}}, nil
+		}
+		if fn, ok := left.(cbor.Tag); ok && fn.Number == TagFun {
+			isMatch := false
+			cases := fn.Content.([]interface{})
+			if len(cases) == 0 {
+				return nil, fmt.Errorf("empty function")
+			}
+			for i := 0; i < len(cases); i += 2 {
+				pattern := cases[i]
+				body := cases[i+1]
+
+				newEnv := make(Env)
+				for k, v := range env {
+					newEnv[k] = v
+				}
+
+				if pat, ok := pattern.(cbor.Tag); ok && pat.Number == TagSym {
+					newEnv[pat.Content.(string)] = right
+					result, err := eval(body, newEnv)
+					if err != nil {
+						return nil, err
+					}
+					return result, nil
+				}
+			}
+			if !isMatch {
+				return nil, fmt.Errorf("unmatched function application")
+			}
+		}
+		return nil, fmt.Errorf("invalid function application: %v", left)
+	default:
+		return nil, fmt.Errorf("unimplemented operator: %v", op)
+	}
+}
+
 func eval(v interface{}, env Env) (interface{}, error) {
 	if v == nil {
 		return nil, nil
@@ -79,8 +329,15 @@ func eval(v interface{}, env Env) (interface{}, error) {
 
 	case cbor.Tag:
 		switch x.Number {
-		case TagFun, TagType, TagTag, TagEtc:
+		case TagFun, TagType, TagTag:
 			return x, nil
+
+		case TagEtc:
+			v, err := eval(x.Content, env)
+			if err != nil {
+				return nil, err
+			}
+			return v, nil
 
 		case TagSym:
 			if name, ok := x.Content.(string); ok {
@@ -120,291 +377,14 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							}
 							left = l
 						}
+
 						stack = stack[:len(stack)-2]
 
-						switch op {
-						case ".":
-							stack = append(stack, left)
-							continue
-						case "=":
-							if pat, ok := left.(cbor.Tag); ok && pat.Number == TagSym {
-								if env == nil {
-									return nil, fmt.Errorf("cannot assign to variable %v (no environment)", pat.Content)
-								}
-								env[pat.Content.(string)] = right
-								stack = append(stack, nil)
-								continue
-							}
-							return nil, fmt.Errorf("cannot assign %v = %v", left, right)
-						case "@":
-							if rec, ok := left.(map[interface{}]interface{}); ok {
-								stack = append(stack, rec[right.(cbor.Tag).Content.(string)])
-								continue
-							}
-							return nil, fmt.Errorf("cannot access key from non-record: %v", left)
-						case "+":
-							result, err := numOp(left, right,
-								func(a, b int64) interface{} { return a + b },
-								func(a, b uint64) interface{} { return a + b },
-								func(a, b float64) interface{} { return a + b })
-							if err != nil {
-								return nil, err
-							}
-							stack = append(stack, result)
-							continue
-						case "-":
-							result, err := numOp(left, right,
-								func(a, b int64) interface{} { return a - b },
-								func(a, b uint64) interface{} { return int64(a) - int64(b) },
-								func(a, b float64) interface{} { return a - b })
-							if err != nil {
-								return nil, err
-							}
-							stack = append(stack, result)
-							continue
-						case "*":
-							result, err := numOp(left, right,
-								func(a, b int64) interface{} { return a * b },
-								func(a, b uint64) interface{} { return int64(a) * int64(b) },
-								func(a, b float64) interface{} { return a * b })
-							if err != nil {
-								return nil, err
-							}
-							stack = append(stack, result)
-							continue
-						case "/":
-							result, err := numOp(left, right,
-								func(a, b int64) interface{} {
-									return fmt.Errorf("division not supported for integers")
-								},
-								func(a, b uint64) interface{} {
-									return fmt.Errorf("division not supported for integers")
-								},
-								func(a, b float64) interface{} {
-									if b == 0 {
-										return fmt.Errorf("division by zero")
-									}
-									return a / b
-								})
-							if err != nil {
-								return nil, err
-							}
-							stack = append(stack, result)
-							continue
-						case "%":
-							result, err := numOp(left, right,
-								func(a, b int64) interface{} {
-									if b == 0 {
-										return fmt.Errorf("modulo by zero")
-									}
-									return a % b
-								},
-								func(a, b uint64) interface{} {
-									if b == 0 {
-										return fmt.Errorf("modulo by zero")
-									}
-									return a % b
-								},
-								func(a, b float64) interface{} {
-									return fmt.Errorf("modulo not supported for floats")
-								})
-							if err != nil {
-								return nil, err
-							}
-							stack = append(stack, result)
-							continue
-						case "^":
-							result, err := numOp(left, right,
-								func(a, b int64) interface{} {
-									return int64(math.Pow(float64(a), float64(b)))
-								},
-								func(a, b uint64) interface{} {
-									return uint64(math.Pow(float64(a), float64(b)))
-								},
-								func(a, b float64) interface{} {
-									return math.Pow(a, b)
-								})
-							if err != nil {
-								return nil, err
-							}
-							stack = append(stack, result)
-							continue
-						case "&&":
-							l, err := asBool(left)
-							if err != nil {
-								return nil, err
-							}
-							r, err := asBool(right)
-							if err != nil {
-								return nil, err
-							}
-							stack = append(stack, l && r)
-							continue
-						case "||":
-							l, err := asBool(left)
-							if err != nil {
-								return nil, err
-							}
-							r, err := asBool(right)
-							if err != nil {
-								return nil, err
-							}
-							stack = append(stack, l || r)
-							continue
-						case ">+":
-							if r, ok := right.([]interface{}); ok {
-								stack = append(stack, append([]interface{}{left}, r...))
-								continue
-							}
-							return nil, fmt.Errorf("expected list, got %T", right)
-						case "+<":
-							if l, ok := left.([]interface{}); ok {
-								stack = append(stack, append(l, right))
-								continue
-							}
-							return nil, fmt.Errorf("expected list, got %T", left)
-						case "++":
-							if l, ok := left.(string); ok {
-								if r, ok := right.(string); ok {
-									stack = append(stack, l+r)
-									continue
-								}
-							}
-							if l, ok := left.([]interface{}); ok {
-								if r, ok := right.([]interface{}); ok {
-									stack = append(stack, append(l, r...))
-									continue
-								}
-							}
-							return nil, fmt.Errorf("expected lists or texts, got %T and %T", left, right)
-						case "==":
-							// TODO: Compare as bytes.
-							stack = append(stack, left == right)
-							continue
-						case "/=":
-							// TODO: Compare as bytes.
-							stack = append(stack, left != right)
-							continue
-						case "<", ">", "<=", ">=":
-							result, err := numOp(left, right,
-								func(a, b int64) interface{} {
-									switch op {
-									case "<":
-										return a < b
-									case ">":
-										return a > b
-									case "<=":
-										return a <= b
-									case ">=":
-										return a >= b
-									}
-									return nil
-								},
-								func(a, b uint64) interface{} {
-									switch op {
-									case "<":
-										return a < b
-									case ">":
-										return a > b
-									case "<=":
-										return a <= b
-									case ">=":
-										return a >= b
-									}
-									return nil
-								},
-								func(a, b float64) interface{} {
-									switch op {
-									case "<":
-										return a < b
-									case ">":
-										return a > b
-									case "<=":
-										return a <= b
-									case ">=":
-										return a >= b
-									}
-									return nil
-								})
-							if err != nil {
-								return nil, err
-							}
-							stack = append(stack, result)
-							continue
-						case "'":
-							val, err := eval(cbor.Tag{Number: TagExpr, Content: []interface{}{left, right, cbor.Tag{Number: TagSym, Content: "pair"}}}, env)
-							if err != nil {
-								return nil, err
-							}
-							stack = append(stack, val)
-							continue
-						case "|>":
-							val, err := eval(cbor.Tag{Number: TagExpr, Content: []interface{}{right, left, cbor.Tag{Number: TagOp, Content: " "}}}, env)
-							if err != nil {
-								return nil, err
-							}
-							stack = append(stack, val)
-							continue
-						// case "::":
-						// 	stack = append(stack, cbor.Tag{Number: TagTag, Content: right.(cbor.Tag).Content})
-						// 	continue
-						case " ":
-							l, err := eval(left, env)
-							if err != nil {
-								return nil, err
-							}
-							left = l
-							if tag, ok := left.(cbor.Tag); ok && tag.Number == TagTag {
-								val, err := eval(right, env)
-								if err != nil {
-									return nil, err
-								}
-								if tag.Content == "true" && right == nil {
-									stack = append(stack, true)
-									continue
-								}
-								if tag.Content == "false" && right == nil {
-									stack = append(stack, false)
-									continue
-								}
-								stack = append(stack, cbor.Tag{Number: TagExpr, Content: []interface{}{tag, val, cbor.Tag{Number: TagOp, Content: " "}}})
-								continue
-							}
-							if fn, ok := left.(cbor.Tag); ok && fn.Number == TagFun {
-								isMatch := false
-								cases := fn.Content.([]interface{})
-								if len(cases) == 0 {
-									return nil, fmt.Errorf("empty function")
-								}
-								for i := 0; i < len(cases); i += 2 {
-									pattern := cases[i]
-									body := cases[i+1]
-
-									newEnv := make(Env)
-									for k, v := range env {
-										newEnv[k] = v
-									}
-
-									if pat, ok := pattern.(cbor.Tag); ok && pat.Number == TagSym {
-										newEnv[pat.Content.(string)] = right
-										result, err := eval(body, newEnv)
-										if err != nil {
-											return nil, err
-										}
-										stack = append(stack, result)
-										isMatch = true
-										break
-									}
-								}
-								if !isMatch {
-									return nil, fmt.Errorf("unmatched function application")
-								}
-								continue
-							}
-							return nil, fmt.Errorf("invalid function application: %v", left)
-						default:
-							return nil, fmt.Errorf("unimplemented operator: %v", op)
+						res, err := applyOp(op, left, right, env)
+						if err != nil {
+							return nil, err
 						}
+						stack = append(stack, res)
 					} else {
 						stack = append(stack, x)
 					}

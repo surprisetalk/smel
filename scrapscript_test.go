@@ -198,7 +198,7 @@ func TestScrapscript(t *testing.T) {
 		{in: "a -> b -> a + b"},
 		{in: "-- ", error: "empty input"},
 		// {in: "- ", error: "TODO"},
-		{in: "..."},
+		{in: "...", error: "undefined variable"},
 		{in: "..", error: "unexpected Token"},
 		{in: "$$bills", error: "undefined variable"},
 		{in: "1-2"},
