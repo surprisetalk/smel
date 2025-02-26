@@ -44,6 +44,15 @@ func asBool(v interface{}) (bool, error) {
 
 func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 	switch op {
+	case "?":
+		r, err := asBool(right)
+		if err != nil {
+			return nil, err
+		}
+		if !r {
+			return nil, fmt.Errorf("assertion failed")
+		}
+		return left, nil
 	case ".":
 		if right != nil {
 			return nil, fmt.Errorf("expected env, got %v", right)

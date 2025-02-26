@@ -76,7 +76,11 @@ func print(v interface{}) (string, error) {
 		xs__ := []string{}
 		for _, x_ := range xs_ {
 			if x_.k == "" {
-				xs__ = append(xs__, fmt.Sprintf("%v", x_.v))
+				if x_.v == "_" {
+					xs__ = append(xs__, "...")
+				} else {
+					xs__ = append(xs__, fmt.Sprintf("..%v", x_.v))
+				}
 			} else {
 				xs__ = append(xs__, fmt.Sprintf("%v = %v", x_.k, x_.v))
 			}
