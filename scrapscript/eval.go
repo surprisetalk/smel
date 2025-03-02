@@ -3,6 +3,7 @@ package scrapscript
 import (
 	"fmt"
 	"math"
+	"reflect"
 	"slices"
 
 	"github.com/fxamacker/cbor/v2"
@@ -409,6 +410,58 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 						}
 					}
 					continue
+				}
+
+				if patExpr, ok := pattern.(cbor.Tag); ok && patExpr.Number == TagExpr {
+					if content, ok := patExpr.Content.([]interface{}); ok {
+						if len(content) >= 3 {
+							var isUnconsPattern bool
+							var firstPattern, restPattern interface{}
+
+							for j := 0; j < len(content)-2; j++ {
+								if opTag, ok := content[j+2].(cbor.Tag); ok && opTag.Number == TagOp && opTag.Content == ">+" {
+									isUnconsPattern = true
+									firstPattern = content[j]
+									restPattern = content[j+1]
+									break
+								}
+							}
+
+							if isUnconsPattern {
+								if rightList, ok := right.([]interface{}); ok && len(rightList) > 0 {
+									unconsEnv := make(Env)
+									for k, v := range newEnv {
+										unconsEnv[k] = v
+									}
+
+									firstElem := rightList[0]
+									restElems := rightList[1:]
+
+									if firstSym, ok := firstPattern.(cbor.Tag); ok && firstSym.Number == TagSym {
+										unconsEnv[firstSym.Content.(string)] = firstElem
+									} else if firstPattern != firstElem {
+										continue
+									}
+
+									if restSym, ok := restPattern.(cbor.Tag); ok && restSym.Number == TagSym {
+										unconsEnv[restSym.Content.(string)] = restElems
+									} else if !reflect.DeepEqual(restPattern, restElems) {
+										continue
+									}
+
+									result, err := eval(body, unconsEnv)
+									if err != nil {
+										return nil, err
+									}
+									if fn, ok := result.(cbor.Tag); ok && fn.Number == TagFun {
+										return &closure{fn: fn, env: unconsEnv}, nil
+									}
+									return result, nil
+								}
+								continue
+							}
+						}
+					}
 				}
 			}
 			l, _ := print(left)
