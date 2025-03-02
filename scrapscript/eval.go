@@ -311,9 +311,42 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 					return result, nil
 				}
 			}
-			return nil, fmt.Errorf("unmatched function application")
+			l, _ := print(left)
+			r, _ := print(right)
+			return nil, fmt.Errorf("unmatched function application: (%v) %v", l, r)
 		}
 		return nil, fmt.Errorf("invalid function application: %v", left)
+	case ">>":
+		if leftFn, ok := left.(*closure); ok {
+			if rightFn, ok := right.(*closure); ok {
+				composedFn := cbor.Tag{
+					Number: TagFun,
+					Content: []interface{}{
+						cbor.Tag{Number: TagSym, Content: "x"},
+						cbor.Tag{
+							Number: TagExpr,
+							Content: []interface{}{
+								rightFn,
+								leftFn,
+								cbor.Tag{Number: TagSym, Content: "x"},
+								cbor.Tag{Number: TagOp, Content: " "},
+								cbor.Tag{Number: TagOp, Content: " "},
+							},
+						},
+					},
+				}
+				return &closure{fn: composedFn, env: env}, nil
+			}
+			if rightTag, ok := right.(cbor.Tag); ok && rightTag.Number == TagFun {
+				rightClosure := &closure{fn: rightTag, env: env}
+				return applyOp(">>", leftFn, rightClosure, env)
+			}
+		}
+		if leftTag, ok := left.(cbor.Tag); ok && leftTag.Number == TagFun {
+			leftClosure := &closure{fn: leftTag, env: env}
+			return applyOp(">>", leftClosure, right, env)
+		}
+		return nil, fmt.Errorf("function composition requires two functions, got %T and %T", left, right)
 	default:
 		return nil, fmt.Errorf("unimplemented operator: %v", op)
 	}
@@ -393,7 +426,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							left = tmp
 						}
 
-						if !slices.Contains([]string{"=", "@", "::", " "}, op) {
+						if !slices.Contains([]string{"=", "@", "::"}, op) {
 							r, err := eval(right, env)
 							if err != nil {
 								return nil, err
