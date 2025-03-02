@@ -310,6 +310,106 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 					}
 					return result, nil
 				}
+
+				if intPattern, ok := pattern.(int64); ok {
+					if rightInt, ok := right.(int64); ok && intPattern == rightInt {
+						result, err := eval(body, newEnv)
+						if err != nil {
+							return nil, err
+						}
+						if fn, ok := result.(cbor.Tag); ok && fn.Number == TagFun {
+							return &closure{fn: fn, env: newEnv}, nil
+						}
+						return result, nil
+					}
+					continue
+				}
+
+				if uintPattern, ok := pattern.(uint64); ok {
+					if rightUint, ok := right.(uint64); ok && uintPattern == rightUint {
+						result, err := eval(body, newEnv)
+						if err != nil {
+							return nil, err
+						}
+						if fn, ok := result.(cbor.Tag); ok && fn.Number == TagFun {
+							return &closure{fn: fn, env: newEnv}, nil
+						}
+						return result, nil
+					}
+					continue
+				}
+
+				if patRecord, ok := pattern.(map[interface{}]interface{}); ok {
+					if rightRecord, ok := right.(map[interface{}]interface{}); ok {
+						matched := true
+
+						for k, patVal := range patRecord {
+							rightVal, exists := rightRecord[k]
+							if !exists {
+								matched = false
+								break
+							}
+
+							if patSym, ok := patVal.(cbor.Tag); ok && patSym.Number == TagSym {
+								newEnv[patSym.Content.(string)] = rightVal
+								continue
+							}
+
+							if patVal != rightVal {
+								matched = false
+								break
+							}
+						}
+
+						if matched {
+							result, err := eval(body, newEnv)
+							if err != nil {
+								return nil, err
+							}
+							if fn, ok := result.(cbor.Tag); ok && fn.Number == TagFun {
+								return &closure{fn: fn, env: newEnv}, nil
+							}
+							return result, nil
+						}
+					}
+					continue
+				}
+
+				if patList, ok := pattern.([]interface{}); ok {
+					if rightList, ok := right.([]interface{}); ok {
+						if len(patList) != len(rightList) {
+							continue
+						}
+
+						matched := true
+
+						for j, patItem := range patList {
+							rightItem := rightList[j]
+
+							if patSym, ok := patItem.(cbor.Tag); ok && patSym.Number == TagSym {
+								newEnv[patSym.Content.(string)] = rightItem
+								continue
+							}
+
+							if patItem != rightItem {
+								matched = false
+								break
+							}
+						}
+
+						if matched {
+							result, err := eval(body, newEnv)
+							if err != nil {
+								return nil, err
+							}
+							if fn, ok := result.(cbor.Tag); ok && fn.Number == TagFun {
+								return &closure{fn: fn, env: newEnv}, nil
+							}
+							return result, nil
+						}
+					}
+					continue
+				}
 			}
 			l, _ := print(left)
 			r, _ := print(right)
