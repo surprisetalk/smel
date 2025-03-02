@@ -226,7 +226,6 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 			}
 			return cbor.Tag{Number: TagExpr, Content: []interface{}{tag, right, cbor.Tag{Number: TagOp, Content: " "}}}, nil
 		}
-
 		if closure, ok := left.(*closure); ok {
 			closureEnv := make(Env)
 			for k, v := range closure.env {
@@ -234,13 +233,11 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 			}
 			return applyOp(" ", closure.fn, right, closureEnv)
 		}
-
 		if fn, ok := left.(cbor.Tag); ok && fn.Number == TagFun {
 			cases := fn.Content.([]interface{})
 			if len(cases) == 0 {
 				return nil, fmt.Errorf("empty function")
 			}
-
 			handleMatch := func(body interface{}, matchEnv Env) (interface{}, error) {
 				result, err := eval(body, matchEnv)
 				if err != nil {
@@ -251,7 +248,6 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 				}
 				return result, nil
 			}
-
 			for i := 0; i < len(cases); i += 2 {
 				pattern := cases[i]
 				body := cases[i+1]
@@ -261,31 +257,50 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 					newEnv[k] = v
 				}
 
-				if pat, ok := pattern.(cbor.Tag); ok && pat.Number == TagSym {
-					newEnv[pat.Content.(string)] = right
-					return handleMatch(body, newEnv)
-				}
+				matched := false
 
-				if intPattern, ok := pattern.(int64); ok {
-					if rightInt, ok := right.(int64); ok && intPattern == rightInt {
-						return handleMatch(body, newEnv)
+				switch p := pattern.(type) {
+				case int64:
+					if r, ok := right.(int64); ok && p == r {
+						matched = true
 					}
-					continue
-				}
-
-				if uintPattern, ok := pattern.(uint64); ok {
-					if rightUint, ok := right.(uint64); ok && uintPattern == rightUint {
-						return handleMatch(body, newEnv)
+				case uint64:
+					if r, ok := right.(uint64); ok && p == r {
+						matched = true
 					}
-					continue
-				}
-
-				if patRecord, ok := pattern.(map[interface{}]interface{}); ok {
-					if rightRecord, ok := right.(map[interface{}]interface{}); ok {
-						matched := true
-
-						for k, patVal := range patRecord {
-							rightVal, exists := rightRecord[k]
+				case cbor.Tag:
+					if p.Number == TagSym {
+						newEnv[p.Content.(string)] = right
+						matched = true
+					} else if p.Number == TagExpr {
+						if content, ok := p.Content.([]interface{}); ok && len(content) >= 3 {
+							for j := 0; j < len(content)-2; j++ {
+								if opTag, ok := content[j+2].(cbor.Tag); ok && opTag.Number == TagOp && opTag.Content == ">+" {
+									if rightList, ok := right.([]interface{}); ok && len(rightList) > 0 {
+										firstPattern, restPattern := content[j], content[j+1]
+										firstElem, restElems := rightList[0], rightList[1:]
+										if firstSym, ok := firstPattern.(cbor.Tag); ok && firstSym.Number == TagSym {
+											newEnv[firstSym.Content.(string)] = firstElem
+										} else if firstPattern != firstElem {
+											continue
+										}
+										if restSym, ok := restPattern.(cbor.Tag); ok && restSym.Number == TagSym {
+											newEnv[restSym.Content.(string)] = restElems
+										} else if !reflect.DeepEqual(restPattern, restElems) {
+											continue
+										}
+										matched = true
+									}
+									break
+								}
+							}
+						}
+					}
+				case map[interface{}]interface{}:
+					if r, ok := right.(map[interface{}]interface{}); ok {
+						matched = true
+						for k, patVal := range p {
+							rightVal, exists := r[k]
 							if !exists {
 								matched = false
 								break
@@ -293,94 +308,29 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 
 							if patSym, ok := patVal.(cbor.Tag); ok && patSym.Number == TagSym {
 								newEnv[patSym.Content.(string)] = rightVal
-								continue
-							}
-
-							if patVal != rightVal {
+							} else if patVal != rightVal {
 								matched = false
 								break
 							}
 						}
-
-						if matched {
-							return handleMatch(body, newEnv)
-						}
 					}
-					continue
-				}
-
-				if patList, ok := pattern.([]interface{}); ok {
-					if rightList, ok := right.([]interface{}); ok {
-						if len(patList) != len(rightList) {
-							continue
-						}
-
-						matched := true
-
-						for j, patItem := range patList {
-							rightItem := rightList[j]
+				case []interface{}:
+					if r, ok := right.([]interface{}); ok && len(p) == len(r) {
+						matched = true
+						for j, patItem := range p {
+							rightItem := r[j]
 
 							if patSym, ok := patItem.(cbor.Tag); ok && patSym.Number == TagSym {
 								newEnv[patSym.Content.(string)] = rightItem
-								continue
-							}
-
-							if patItem != rightItem {
+							} else if patItem != rightItem {
 								matched = false
 								break
 							}
 						}
-
-						if matched {
-							return handleMatch(body, newEnv)
-						}
 					}
-					continue
 				}
-
-				if patExpr, ok := pattern.(cbor.Tag); ok && patExpr.Number == TagExpr {
-					if content, ok := patExpr.Content.([]interface{}); ok {
-						if len(content) >= 3 {
-							var isUnconsPattern bool
-							var firstPattern, restPattern interface{}
-
-							for j := 0; j < len(content)-2; j++ {
-								if opTag, ok := content[j+2].(cbor.Tag); ok && opTag.Number == TagOp && opTag.Content == ">+" {
-									isUnconsPattern = true
-									firstPattern = content[j]
-									restPattern = content[j+1]
-									break
-								}
-							}
-
-							if isUnconsPattern {
-								if rightList, ok := right.([]interface{}); ok && len(rightList) > 0 {
-									unconsEnv := make(Env)
-									for k, v := range newEnv {
-										unconsEnv[k] = v
-									}
-
-									firstElem := rightList[0]
-									restElems := rightList[1:]
-
-									if firstSym, ok := firstPattern.(cbor.Tag); ok && firstSym.Number == TagSym {
-										unconsEnv[firstSym.Content.(string)] = firstElem
-									} else if firstPattern != firstElem {
-										continue
-									}
-
-									if restSym, ok := restPattern.(cbor.Tag); ok && restSym.Number == TagSym {
-										unconsEnv[restSym.Content.(string)] = restElems
-									} else if !reflect.DeepEqual(restPattern, restElems) {
-										continue
-									}
-
-									return handleMatch(body, unconsEnv)
-								}
-								continue
-							}
-						}
-					}
+				if matched {
+					return handleMatch(body, newEnv)
 				}
 			}
 			l, _ := print(left)
