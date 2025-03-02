@@ -88,80 +88,83 @@ func print(v interface{}) (string, error) {
 				suffix := ""
 
 				for _, x := range xs {
-					if x_, ok := x.(cbor.Tag); ok && x_.Number == TagOp {
-						if x_.Content.(string) == "#" {
+					var text string
+					var p prec = prec{10000, 10000} // Default precedence for most elements
+
+					x_, ok := x.(cbor.Tag)
+					if !ok {
+						_, err := print(x)
+						if err != nil {
+							return "", err
+						}
+					}
+
+					switch x_.Number {
+					case TagOp:
+						op := x_.Content.(string)
+						if op == "#" {
 							if len(s) < 1 {
 								return "", fmt.Errorf("insufficient operands for #")
 							}
-							s[len(s)-1] = struct {
-								text string
-								prec prec
-							}{"#" + s[len(s)-1].text, s[len(s)-1].prec}
+							s[len(s)-1].text = "#" + s[len(s)-1].text
 							continue
 						}
-
 						if len(s) < 2 {
 							return "", fmt.Errorf("insufficient operands for operator")
 						}
 
-						op := x_.Content.(string)
 						pp, ok := precs[op]
 						if !ok {
 							return "", fmt.Errorf("unrecognized operator: %v", op)
 						}
 
-						right := s[len(s)-1]
-						left := s[len(s)-2]
-						s = s[:len(s)-2]
-
+						left, right := s[len(s)-2], s[len(s)-1]
 						if op == "." {
-							tmp := right
-							right = left
-							left = tmp
+							left, right = right, left
 						}
+
+						s = s[:len(s)-2]
 
 						opStr := op
 						if op != " " {
-							if !slices.Contains([]string{"::", "@", "^", "*", "/", "//", " "}, op) || left.prec.pr < pp.pl || left.prec.pl == precs[" "].pl || right.prec.pl == precs[" "].pl {
+							if !slices.Contains([]string{"::", "@", "^", "*", "/", "//", " "}, op) ||
+								left.prec.pr < pp.pl || left.prec.pl == precs[" "].pl || right.prec.pl == precs[" "].pl {
 								opStr = " " + op + " "
 							}
 						}
 
-						leftStr := left.text
+						leftStr, rightStr := left.text, right.text
 						if left.prec.pr < pp.pl {
 							leftStr = "(" + leftStr + ")"
 						}
-
-						rightStr := right.text
 						if right.prec.pl < pp.pr {
 							rightStr = "(" + rightStr + ")"
 						}
+						text = leftStr + opStr + rightStr
+						p = pp
 
-						s = append(s, struct {
-							text string
-							prec prec
-						}{
-							leftStr + opStr + rightStr,
-							pp,
-						})
-					} else if x_, ok := x.(cbor.Tag); ok && x_.Number == TagFun {
-						text, err := print(x)
+					case TagFun:
+						var err error
+						text, err = print(x)
 						if err != nil {
 							return "", err
 						}
-						s = append(s, struct {
-							text string
-							prec prec
-						}{text, prec{5, 4.9}})
-					} else {
-						text, err := print(x)
+						p = prec{5, 4.9}
+
+					default:
+						var err error
+						text, err = print(x)
 						if err != nil {
 							return "", err
+
 						}
+					}
+
+					if text != "" {
 						s = append(s, struct {
 							text string
 							prec prec
-						}{text, prec{10000, 10000}})
+						}{text, p})
 					}
 				}
 
