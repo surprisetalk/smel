@@ -14,45 +14,36 @@ func print(v interface{}) (string, error) {
 	if v == nil {
 		return "()", nil
 	}
-	if x, ok := (v).(bool); ok {
+
+	switch x := v.(type) {
+	case bool, uint64, int64:
 		return fmt.Sprintf("%v", x), nil
-	}
-	if x, ok := (v).(uint64); ok {
-		return fmt.Sprintf("%v", x), nil
-	}
-	if x, ok := (v).(int64); ok {
-		return fmt.Sprintf("%v", x), nil
-	}
-	if x, ok := (v).(float64); ok {
+	case float64:
 		s := fmt.Sprintf("%f", x)
 		s = strings.TrimRight(s, "0")
 		if strings.HasSuffix(s, ".") {
 			s = s + "0"
 		}
 		return s, nil
-	}
-	if x, ok := (v).([]byte); ok {
+	case []byte:
 		return fmt.Sprintf("~~%v", base64.StdEncoding.EncodeToString(x)), nil
-	}
-	if x, ok := (v).(string); ok {
+	case string:
 		return fmt.Sprintf(`"%v"`, x), nil
-	}
-	if xs, ok := (v).([]interface{}); ok {
-		if len(xs) == 0 {
+	case []interface{}:
+		if len(x) == 0 {
 			return "[]", nil
 		}
 		xs_ := []string{}
-		for _, x := range xs {
-			x_, err := print(x)
+		for _, item := range x {
+			item_, err := print(item)
 			if err != nil {
 				return "", err
 			}
-			xs_ = append(xs_, x_)
+			xs_ = append(xs_, item_)
 		}
 		return fmt.Sprintf("[ %v ]", strings.Join(xs_, ", ")), nil
-	}
-	if xs, ok := (v).(map[interface{}]interface{}); ok {
-		if len(xs) == 0 {
+	case map[interface{}]interface{}:
+		if len(x) == 0 {
 			return "{}", nil
 		}
 		type kv struct {
@@ -60,8 +51,8 @@ func print(v interface{}) (string, error) {
 			v string
 		}
 		xs_ := []kv{}
-		for k, x := range xs {
-			v, err := print(x)
+		for k, item := range x {
+			v, err := print(item)
 			if err != nil {
 				return "", err
 			}
@@ -86,8 +77,7 @@ func print(v interface{}) (string, error) {
 			}
 		}
 		return fmt.Sprintf("{ %v }", strings.Join(xs__, ", ")), nil
-	}
-	if x, ok := (v).(cbor.Tag); ok {
+	case cbor.Tag:
 		switch x.Number {
 		case TagExpr:
 			if xs, ok := x.Content.([]interface{}); ok {
@@ -226,11 +216,12 @@ func print(v interface{}) (string, error) {
 				return "#" + s, nil
 			}
 			return "", fmt.Errorf("non-string tag")
+		default:
+			return "", fmt.Errorf("unsupported cbor tag %v", x.Number)
 		}
-		return "", fmt.Errorf("unsupported cbor tag %v", x.Number)
+	default:
+		return "", fmt.Errorf("unrecognized flat %v", v)
 	}
-
-	return "", fmt.Errorf("unrecognized flat %v", v)
 }
 
 func Print(flat Flat) (string, error) {
