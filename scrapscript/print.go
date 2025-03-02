@@ -29,6 +29,8 @@ func print(v interface{}) (string, error) {
 		return fmt.Sprintf("~~%v", base64.StdEncoding.EncodeToString(x)), nil
 	case string:
 		return fmt.Sprintf(`"%v"`, x), nil
+	case snap:
+		return fmt.Sprintf("#%v (%v)", x.k, x.v), nil
 	case []interface{}:
 		if len(x) == 0 {
 			return "[]", nil

@@ -3,7 +3,6 @@ package scrapscript
 import (
 	"fmt"
 	"math"
-	"reflect"
 	"slices"
 
 	"github.com/fxamacker/cbor/v2"
@@ -14,6 +13,12 @@ type Env map[string]interface{}
 type closure struct {
 	fn  cbor.Tag
 	env Env
+}
+
+type snap struct {
+	t interface{}
+	k string
+	v interface{}
 }
 
 func numOp(left, right interface{}, intOp func(int64, int64) interface{}, uintOp func(uint64, uint64) interface{}, floatOp func(float64, float64) interface{}) (interface{}, error) {
@@ -43,6 +48,112 @@ func asBool(v interface{}) (bool, error) {
 		return b, nil
 	}
 	return false, fmt.Errorf("expected boolean, got %T", v)
+}
+
+func match(pattern, value interface{}, env Env) (interface{}, bool, error) {
+	switch p := pattern.(type) {
+	case int64:
+		if r, ok := value.(int64); ok && p == r {
+			return value, true, nil
+		}
+	case uint64:
+		if r, ok := value.(uint64); ok && p == r {
+			return value, true, nil
+		}
+	case snap:
+		if r, ok := value.(snap); ok {
+			if p.k == r.k {
+				return match(p.v, r.v, env)
+			}
+		}
+	case cbor.Tag:
+		switch p.Number {
+		case TagSym:
+			env[p.Content.(string)] = value
+			return value, true, nil
+		case TagExpr:
+			if content, ok := p.Content.([]interface{}); ok && len(content) >= 3 {
+				for j := 0; j < len(content)-2; j++ {
+					if opTag, ok := content[j+2].(cbor.Tag); ok && opTag.Number == TagOp {
+						switch opTag.Content {
+						case ">+":
+							if rightList, ok := value.([]interface{}); ok && len(rightList) > 0 {
+								firstPattern, restPattern := content[j], content[j+1]
+								firstElem, restElems := rightList[0], rightList[1:]
+								_, firstMatched, err := match(firstPattern, firstElem, env)
+								if err != nil {
+									return nil, false, err
+								}
+								if !firstMatched {
+									continue
+								}
+								_, restMatched, err := match(restPattern, restElems, env)
+								if err != nil {
+									return nil, false, err
+								}
+								if restMatched {
+									return value, true, nil
+								}
+							}
+						case " ":
+							// TODO: This doesn't seem to be working.
+							if tagPattern, ok := content[j].(cbor.Tag); ok && tagPattern.Number == TagTag {
+								snapPattern := snap{nil, tagPattern.Content.(string), content[j+1]}
+								if snapValue, ok := value.(snap); ok && snapPattern.k == snapValue.k {
+									if _, matched, err := match(snapPattern.v, snapValue.v, env); err != nil {
+										return nil, false, err
+									} else if matched {
+										return value, true, nil
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	case map[interface{}]interface{}:
+		if r, ok := value.(map[interface{}]interface{}); ok {
+			allMatched := true
+			for k, patVal := range p {
+				rightVal, exists := r[k]
+				if !exists {
+					allMatched = false
+					break
+				}
+				if patSym, ok := patVal.(cbor.Tag); ok && patSym.Number == TagSym {
+					env[patSym.Content.(string)] = rightVal
+				} else if _, matched, err := match(patVal, rightVal, env); err != nil {
+					return nil, false, err
+				} else if !matched {
+					allMatched = false
+					break
+				}
+			}
+			if allMatched {
+				return value, true, nil
+			}
+		}
+	case []interface{}:
+		if r, ok := value.([]interface{}); ok && len(p) == len(r) {
+			allMatched := true
+			for j, patItem := range p {
+				rightItem := r[j]
+				if patSym, ok := patItem.(cbor.Tag); ok && patSym.Number == TagSym {
+					env[patSym.Content.(string)] = rightItem
+				} else if _, matched, err := match(patItem, rightItem, env); err != nil {
+					return nil, false, err
+				} else if !matched {
+					allMatched = false
+					break
+				}
+			}
+			if allMatched {
+				return value, true, nil
+			}
+		}
+	}
+	return nil, false, nil
 }
 
 func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
@@ -224,7 +335,7 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 			if tag.Content == "false" && right == nil {
 				return false, nil
 			}
-			return cbor.Tag{Number: TagExpr, Content: []interface{}{tag, right, cbor.Tag{Number: TagOp, Content: " "}}}, nil
+			return snap{nil, tag.Content.(string), right}, nil
 		}
 		if closure, ok := left.(*closure); ok {
 			closureEnv := make(Env)
@@ -257,82 +368,9 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 					newEnv[k] = v
 				}
 
-				matched := false
-
-				switch p := pattern.(type) {
-				case int64:
-					if r, ok := right.(int64); ok && p == r {
-						matched = true
-					}
-				case uint64:
-					if r, ok := right.(uint64); ok && p == r {
-						matched = true
-					}
-				case cbor.Tag:
-					switch p.Number {
-					case TagSym:
-						newEnv[p.Content.(string)] = right
-						matched = true
-					case TagExpr:
-						if content, ok := p.Content.([]interface{}); ok && len(content) >= 3 {
-							for j := 0; j < len(content)-2; j++ {
-								if opTag, ok := content[j+2].(cbor.Tag); ok && opTag.Number == TagOp {
-									switch opTag.Content {
-									case ">+":
-										if rightList, ok := right.([]interface{}); ok && len(rightList) > 0 {
-											firstPattern, restPattern := content[j], content[j+1]
-											firstElem, restElems := rightList[0], rightList[1:]
-											if firstSym, ok := firstPattern.(cbor.Tag); ok && firstSym.Number == TagSym {
-												newEnv[firstSym.Content.(string)] = firstElem
-											} else if firstPattern != firstElem {
-												continue
-											}
-											if restSym, ok := restPattern.(cbor.Tag); ok && restSym.Number == TagSym {
-												newEnv[restSym.Content.(string)] = restElems
-											} else if !reflect.DeepEqual(restPattern, restElems) {
-												continue
-											}
-											matched = true
-										}
-									}
-								}
-							}
-						}
-					}
-				case map[interface{}]interface{}:
-					if r, ok := right.(map[interface{}]interface{}); ok {
-						matched = true
-						for k, patVal := range p {
-							rightVal, exists := r[k]
-							if !exists {
-								matched = false
-								break
-							}
-
-							if patSym, ok := patVal.(cbor.Tag); ok && patSym.Number == TagSym {
-								newEnv[patSym.Content.(string)] = rightVal
-							} else if patVal != rightVal {
-								matched = false
-								break
-							}
-						}
-					}
-				case []interface{}:
-					if r, ok := right.([]interface{}); ok && len(p) == len(r) {
-						matched = true
-						for j, patItem := range p {
-							rightItem := r[j]
-
-							if patSym, ok := patItem.(cbor.Tag); ok && patSym.Number == TagSym {
-								newEnv[patSym.Content.(string)] = rightItem
-							} else if patItem != rightItem {
-								matched = false
-								break
-							}
-						}
-					}
-				}
-				if matched {
+				if _, matched, err := match(pattern, right, newEnv); err != nil {
+					return nil, err
+				} else if matched {
 					return handleMatch(body, newEnv)
 				}
 			}
@@ -391,6 +429,10 @@ func eval(v interface{}, env Env) (interface{}, error) {
 		return x, nil
 
 	case bool, uint64, int64, float64, []byte, string:
+		return x, nil
+
+	case snap:
+		// TODO: Evaluate the snap value
 		return x, nil
 
 	case []interface{}:
