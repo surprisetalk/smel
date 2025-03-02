@@ -24,7 +24,6 @@ const (
 	TagOp   TagN = '+'
 	TagSym  TagN = '='
 	TagTag  TagN = '#'
-	TagEtc  TagN = '.'
 	TagFun  TagN = '|'  // e.g. | a -> 0 | _ -> 1
 	TagDict TagN = '\'' // e.g. dict/from [ "a"' 1, "b"' 1 ]
 	TagType TagN = ':'  // e.g. #a int #b int
@@ -227,11 +226,7 @@ func (p *parser) unary(prec float64) ([]Flat, error) {
 					if p.peek() == nil {
 						return nil, fmt.Errorf("unexpected end during spread")
 					}
-					next, err := expr(p.unary(prec))
-					if err != nil {
-						return nil, err
-					}
-					v, err := tag(TagEtc, next)
+					v, err := expr(p.unary(prec))
 					if err != nil {
 						return nil, err
 					}
@@ -280,7 +275,7 @@ func (p *parser) unary(prec float64) ([]Flat, error) {
 		if err != nil {
 			return nil, err
 		}
-		return value(tag(TagEtc, v))
+		return value(tag(TagSym, v))
 
 	case TokenOperator:
 		switch token.Value {
