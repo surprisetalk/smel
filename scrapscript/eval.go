@@ -10,6 +10,11 @@ import (
 
 type Env map[string]interface{}
 
+type closure struct {
+	fn  cbor.Tag
+	env Env
+}
+
 func numOp(left, right interface{}, intOp func(int64, int64) interface{}, uintOp func(uint64, uint64) interface{}, floatOp func(float64, float64) interface{}) (interface{}, error) {
 	if l, ok := left.(uint64); ok {
 		if r, ok := right.(uint64); ok {
@@ -270,12 +275,21 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 			}
 			return cbor.Tag{Number: TagExpr, Content: []interface{}{tag, right, cbor.Tag{Number: TagOp, Content: " "}}}, nil
 		}
+
+		if closure, ok := left.(*closure); ok {
+			closureEnv := make(Env)
+			for k, v := range closure.env {
+				closureEnv[k] = v
+			}
+			return applyOp(" ", closure.fn, right, closureEnv)
+		}
+
 		if fn, ok := left.(cbor.Tag); ok && fn.Number == TagFun {
-			isMatch := false
 			cases := fn.Content.([]interface{})
 			if len(cases) == 0 {
 				return nil, fmt.Errorf("empty function")
 			}
+
 			for i := 0; i < len(cases); i += 2 {
 				pattern := cases[i]
 				body := cases[i+1]
@@ -291,12 +305,13 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 					if err != nil {
 						return nil, err
 					}
+					if fn, ok := result.(cbor.Tag); ok && fn.Number == TagFun {
+						return &closure{fn: fn, env: newEnv}, nil
+					}
 					return result, nil
 				}
 			}
-			if !isMatch {
-				return nil, fmt.Errorf("unmatched function application")
-			}
+			return nil, fmt.Errorf("unmatched function application")
 		}
 		return nil, fmt.Errorf("invalid function application: %v", left)
 	default:
@@ -314,6 +329,9 @@ func eval(v interface{}, env Env) (interface{}, error) {
 	}
 
 	switch x := v.(type) {
+	case *closure:
+		return x, nil
+
 	case bool, uint64, int64, float64, []byte, string:
 		return x, nil
 
@@ -375,7 +393,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							left = tmp
 						}
 
-						if !slices.Contains([]string{"=", "@", "::"}, op) {
+						if !slices.Contains([]string{"=", "@", "::", " "}, op) {
 							r, err := eval(right, env)
 							if err != nil {
 								return nil, err
@@ -428,6 +446,9 @@ func Eval(flat Flat, env Env) (Flat, error) {
 	res, err := eval(v, env)
 	if err != nil {
 		return nil, err
+	}
+	if closure, ok := res.(*closure); ok {
+		return cbor.Marshal(closure.fn)
 	}
 	return cbor.Marshal(res)
 }
