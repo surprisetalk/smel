@@ -269,29 +269,32 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 						matched = true
 					}
 				case cbor.Tag:
-					if p.Number == TagSym {
+					switch p.Number {
+					case TagSym:
 						newEnv[p.Content.(string)] = right
 						matched = true
-					} else if p.Number == TagExpr {
+					case TagExpr:
 						if content, ok := p.Content.([]interface{}); ok && len(content) >= 3 {
 							for j := 0; j < len(content)-2; j++ {
-								if opTag, ok := content[j+2].(cbor.Tag); ok && opTag.Number == TagOp && opTag.Content == ">+" {
-									if rightList, ok := right.([]interface{}); ok && len(rightList) > 0 {
-										firstPattern, restPattern := content[j], content[j+1]
-										firstElem, restElems := rightList[0], rightList[1:]
-										if firstSym, ok := firstPattern.(cbor.Tag); ok && firstSym.Number == TagSym {
-											newEnv[firstSym.Content.(string)] = firstElem
-										} else if firstPattern != firstElem {
-											continue
+								if opTag, ok := content[j+2].(cbor.Tag); ok && opTag.Number == TagOp {
+									switch opTag.Content {
+									case ">+":
+										if rightList, ok := right.([]interface{}); ok && len(rightList) > 0 {
+											firstPattern, restPattern := content[j], content[j+1]
+											firstElem, restElems := rightList[0], rightList[1:]
+											if firstSym, ok := firstPattern.(cbor.Tag); ok && firstSym.Number == TagSym {
+												newEnv[firstSym.Content.(string)] = firstElem
+											} else if firstPattern != firstElem {
+												continue
+											}
+											if restSym, ok := restPattern.(cbor.Tag); ok && restSym.Number == TagSym {
+												newEnv[restSym.Content.(string)] = restElems
+											} else if !reflect.DeepEqual(restPattern, restElems) {
+												continue
+											}
+											matched = true
 										}
-										if restSym, ok := restPattern.(cbor.Tag); ok && restSym.Number == TagSym {
-											newEnv[restSym.Content.(string)] = restElems
-										} else if !reflect.DeepEqual(restPattern, restElems) {
-											continue
-										}
-										matched = true
 									}
-									break
 								}
 							}
 						}
