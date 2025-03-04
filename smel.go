@@ -53,9 +53,11 @@ func init() {
 	}
 
 	for key, input := range map[string]string{
-		"cmd":      "#none () #out ()",
-		"cmd/none": "cmd::none ()",
-		"cmd/out":  "cmd::out",
+		// "cmd":      "#none () #out ()",
+		// "cmd/none": "cmd::none ()",
+		// "cmd/out":  "cmd::out",
+		"cmd/none": "_::none ()",
+		"cmd/out":  "_::out",
 	} {
 		tokens, err := scrapscript.Lex(input)
 		if err != nil {
@@ -67,8 +69,13 @@ func init() {
 			fmt.Fprintln(os.Stderr, "error parsing", key+":", err)
 			continue
 		}
+		result, err := scrapscript.Eval(flat, env)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "error evaluating", key+":", err)
+			continue
+		}
 		var v interface{}
-		err = cbor.Unmarshal(flat, &v)
+		err = cbor.Unmarshal(result, &v)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error unmarshalling file", key+":", err)
 			continue

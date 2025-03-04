@@ -61,10 +61,8 @@ func match(pattern, value interface{}, env Env) (interface{}, bool, error) {
 			return value, true, nil
 		}
 	case snap:
-		if r, ok := value.(snap); ok {
-			if p.k == r.k {
-				return match(p.v, r.v, env)
-			}
+		if r, ok := value.(snap); ok && p.k == r.k {
+			return match(p.v, r.v, env)
 		}
 	case cbor.Tag:
 		switch p.Number {
@@ -72,41 +70,39 @@ func match(pattern, value interface{}, env Env) (interface{}, bool, error) {
 			env[p.Content.(string)] = value
 			return value, true, nil
 		case TagExpr:
-			if content, ok := p.Content.([]interface{}); ok && len(content) >= 3 {
-				for j := 0; j < len(content)-2; j++ {
-					if opTag, ok := content[j+2].(cbor.Tag); ok && opTag.Number == TagOp {
-						switch opTag.Content {
-						case ">+":
-							if rightList, ok := value.([]interface{}); ok && len(rightList) > 0 {
-								firstPattern, restPattern := content[j], content[j+1]
-								firstElem, restElems := rightList[0], rightList[1:]
-								_, firstMatched, err := match(firstPattern, firstElem, env)
-								if err != nil {
-									return nil, false, err
-								}
-								if !firstMatched {
-									continue
-								}
-								_, restMatched, err := match(restPattern, restElems, env)
-								if err != nil {
-									return nil, false, err
-								}
-								if restMatched {
-									return value, true, nil
-								}
+			// TODO: Figure out what to do when content >= 3.
+			if content, ok := p.Content.([]interface{}); ok && len(content) == 3 {
+				if opTag, ok := content[2].(cbor.Tag); ok && opTag.Number == TagOp {
+					switch opTag.Content {
+					case ">+":
+						if rightList, ok := value.([]interface{}); ok && len(rightList) > 0 {
+							firstPattern, restPattern := content[0], content[1]
+							firstElem, restElems := rightList[0], rightList[1:]
+							_, firstMatched, err := match(firstPattern, firstElem, env)
+							if err != nil {
+								return nil, false, err
 							}
-						case " ":
-							// TODO: This doesn't seem to be working.
-							if tagPattern, ok := content[j].(cbor.Tag); ok && tagPattern.Number == TagTag {
-								snapPattern := snap{nil, tagPattern.Content.(string), content[j+1]}
-								if snapValue, ok := value.(snap); ok && snapPattern.k == snapValue.k {
-									if _, matched, err := match(snapPattern.v, snapValue.v, env); err != nil {
-										return nil, false, err
-									} else if matched {
-										return value, true, nil
-									}
-								}
+							if !firstMatched {
+								return nil, false, nil
 							}
+							_, restMatched, err := match(restPattern, restElems, env)
+							if err != nil {
+								return nil, false, err
+							}
+							if restMatched {
+								return value, true, nil
+							}
+						}
+					case " ":
+						if tagPattern, ok := content[0].(cbor.Tag); ok && tagPattern.Number == TagTag {
+							if tagPattern.Content == "true" && content[1] == nil {
+								return true, true, nil
+							}
+							if tagPattern.Content == "false" && content[1] == nil {
+								return false, true, nil
+							}
+							snapPattern := snap{nil, tagPattern.Content.(string), content[1]}
+							return match(snapPattern, value, env)
 						}
 					}
 				}
@@ -349,16 +345,6 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 			if len(cases) == 0 {
 				return nil, fmt.Errorf("empty function")
 			}
-			handleMatch := func(body interface{}, matchEnv Env) (interface{}, error) {
-				result, err := eval(body, matchEnv)
-				if err != nil {
-					return nil, err
-				}
-				if fn, ok := result.(cbor.Tag); ok && fn.Number == TagFun {
-					return &closure{fn: fn, env: matchEnv}, nil
-				}
-				return result, nil
-			}
 			for i := 0; i < len(cases); i += 2 {
 				pattern := cases[i]
 				body := cases[i+1]
@@ -371,7 +357,14 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 				if _, matched, err := match(pattern, right, newEnv); err != nil {
 					return nil, err
 				} else if matched {
-					return handleMatch(body, newEnv)
+					result, err := eval(body, newEnv)
+					if err != nil {
+						return nil, err
+					}
+					if fn, ok := result.(cbor.Tag); ok && fn.Number == TagFun {
+						return &closure{fn: fn, env: newEnv}, nil
+					}
+					return result, nil
 				}
 			}
 			l, _ := print(left)
@@ -432,8 +425,11 @@ func eval(v interface{}, env Env) (interface{}, error) {
 		return x, nil
 
 	case snap:
-		// TODO: Evaluate the snap value
-		return x, nil
+		v_, err := eval(x.v, env)
+		if err != nil {
+			return nil, err
+		}
+		return snap{nil, x.k, v_}, nil
 
 	case []interface{}:
 		result := make([]interface{}, len(x))
@@ -549,6 +545,13 @@ func Eval(flat Flat, env Env) (Flat, error) {
 	}
 	if closure, ok := res.(*closure); ok {
 		return cbor.Marshal(closure.fn)
+	}
+	if s, ok := res.(snap); ok {
+		return cbor.Marshal(cbor.Tag{Number: TagExpr, Content: []interface{}{
+			cbor.Tag{Number: TagTag, Content: s.k},
+			s.v,
+			cbor.Tag{Number: TagOp, Content: " "},
+		}})
 	}
 	return cbor.Marshal(res)
 }
