@@ -84,7 +84,7 @@ func init() {
 	}
 }
 
-wype del struct {
+type model struct {
 	in         string
 	out        string
 	err        error
