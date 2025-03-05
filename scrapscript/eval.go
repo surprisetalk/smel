@@ -310,11 +310,7 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 		}
 		return nil, fmt.Errorf("expected lists or texts, got %T and %T", left, right)
 	case "'":
-		val, err := eval(cbor.Tag{Number: TagExpr, Content: []interface{}{left, right, cbor.Tag{Number: TagSym, Content: "pair"}}}, env)
-		if err != nil {
-			return nil, err
-		}
-		return val, nil
+		return snap{nil, "pair", []interface{}{left, right}}, nil
 	case "|>":
 		val, err := eval(cbor.Tag{Number: TagExpr, Content: []interface{}{right, left, cbor.Tag{Number: TagOp, Content: " "}}}, env)
 		if err != nil {
@@ -497,7 +493,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 							right = r
 						}
 
-						if !slices.Contains([]string{"="}, op) {
+						if !slices.Contains([]string{"=", "::"}, op) {
 							l, err := eval(left, env)
 							if err != nil {
 								return nil, err
@@ -518,7 +514,7 @@ func eval(v interface{}, env Env) (interface{}, error) {
 				}
 
 				if len(stack) != 1 {
-					return nil, fmt.Errorf("invalid expression: expected 1 value on stack, got %d values", len(stack))
+					return nil, fmt.Errorf("invalid expression: expected 1 value on stack, got %d values: %v", len(stack), stack)
 				}
 				return stack[0], nil
 			}

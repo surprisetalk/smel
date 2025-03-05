@@ -8,42 +8,42 @@ import (
 
 func TestModel_Update(t *testing.T) {
 	tests := []struct {
-		input  string
-		output string
+		in  string
+		out string
 	}{
 		{
-			input:  "always (1 + 2 * 3 - 4)",
-			output: "3",
+			in:  "always (1 + 2 * 3 - 4)",
+			out: "3",
 		},
 		{
-			input:  "always 123",
-			output: "123",
+			in:  "always 123",
+			out: "123",
 		},
 		{
-			input:  "123 + 1 |> always",
-			output: "124",
+			in:  "123 + 1 |> always",
+			out: "124",
 		},
 		{
-			input:  "every 1000",
-			output: "TODO",
+			in:  "every 1000",
+			out: "TODO",
 		},
 		{
-			input:  "every 1000 |> random |> plot",
-			output: "TODO",
+			in:  "every 1000 |> random |> plot",
+			out: "TODO",
 		},
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
+		t.Run(tt.in, func(t *testing.T) {
 			m := model{
-				input: tt.input,
+				in: tt.in,
 			}
 			_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-			msg := cmd().(evalResultMsg)
+			msg := cmd().(evalMsg)
 			if msg.err != nil {
 				t.Errorf("error: %v", msg.err)
-			} else if msg.output != tt.output {
-				t.Errorf("expected output %s, got %s", tt.output, msg.output)
+			} else if msg.out != tt.out {
+				t.Errorf("expected out %s, got %s", tt.out, msg.out)
 			}
 		})
 	}

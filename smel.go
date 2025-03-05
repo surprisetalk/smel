@@ -27,12 +27,12 @@ func init() {
 			continue
 		}
 		filePath := filepath.Join("./widgets", file.Name())
-		input, err := os.ReadFile(filePath)
+		in, err := os.ReadFile(filePath)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error reading file", file.Name()+":", err)
 			continue
 		}
-		tokens, err := scrapscript.Lex(string(input))
+		tokens, err := scrapscript.Lex(string(in))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error lexing file", file.Name()+":", err)
 			continue
@@ -52,14 +52,14 @@ func init() {
 		env[key] = v
 	}
 
-	for key, input := range map[string]string{
+	for key, in := range map[string]string{
 		// "cmd":      "#none () #out ()",
 		// "cmd/none": "cmd::none ()",
 		// "cmd/out":  "cmd::out",
 		"cmd/none": "_::none ()",
 		"cmd/out":  "_::out",
 	} {
-		tokens, err := scrapscript.Lex(input)
+		tokens, err := scrapscript.Lex(in)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error lexing", key+":", err)
 			continue
@@ -84,9 +84,9 @@ func init() {
 	}
 }
 
-type model struct {
-	input      string
-	output     string
+wype del struct {
+	in         string
+	out        string
 	err        error
 	showCursor bool
 }
@@ -105,9 +105,9 @@ func (m model) Init() tea.Cmd {
 
 type tickMsg time.Time
 
-type evalResultMsg struct {
-	output string
-	err    error
+type evalMsg struct {
+	out string
+	err error
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -117,47 +117,47 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyCtrlC, tea.KeyCtrlD, tea.KeyEsc:
 			return m, tea.Quit
 		case tea.KeyEnter:
-			if m.input == "" {
+			if m.in == "" {
 				return m, nil
 			}
 			return m, func() tea.Msg {
-				tokens, err := scrapscript.Lex(m.input)
+				tokens, err := scrapscript.Lex(m.in)
 				if err != nil {
-					return evalResultMsg{err: err}
+					return evalMsg{err: err}
 				}
 
 				flat, err := scrapscript.Parse(tokens)
 				if err != nil {
-					return evalResultMsg{err: err}
+					return evalMsg{err: err}
 				}
 
 				flat, err = scrapscript.Eval(flat, env)
 				if err != nil {
-					return evalResultMsg{err: err}
+					return evalMsg{err: err}
 				}
 
 				result, err := scrapscript.Print(flat)
-				return evalResultMsg{
-					output: strings.TrimSpace(result),
-					err:    err,
+				return evalMsg{
+					out: strings.TrimSpace(result),
+					err: err,
 				}
 			}
 		case tea.KeyBackspace:
-			if len(m.input) > 0 {
-				m.input = m.input[:len(m.input)-1]
+			if len(m.in) > 0 {
+				m.in = m.in[:len(m.in)-1]
 			}
 		default:
 			if msg.String() != "" {
-				m.input += msg.String()
+				m.in += msg.String()
 			}
 		}
 	case tickMsg:
 		m.showCursor = !m.showCursor
 		return m, nil
-	case evalResultMsg:
-		m.output = msg.output
+	case evalMsg:
+		m.out = msg.out
 		m.err = msg.err
-		m.input = ""
+		m.in = ""
 		return m, nil
 	}
 	return m, nil
@@ -169,11 +169,11 @@ func (m model) View() string {
 		cursor = " "
 	}
 	s := ""
-	s += fmt.Sprintf("> %s%s\n\n", m.input, cursor)
+	s += fmt.Sprintf("> %s%s\n\n", m.in, cursor)
 	if m.err != nil {
 		s += fmt.Sprintf("Error: %v\n", m.err)
-	} else if m.output != "" {
-		s += fmt.Sprintf("Result: %s\n", m.output)
+	} else if m.out != "" {
+		s += fmt.Sprintf("Result: %s\n", m.out)
 	} else {
 		s += "\n"
 	}
