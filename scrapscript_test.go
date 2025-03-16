@@ -35,6 +35,12 @@ func TestScrapscript(t *testing.T) {
 		error string
 		env   scrapscript.Env
 	}{
+		{in: `123 ' 123`, eval: `123 ' 123`},
+		{in: `(x -> x ' x) 123`, eval: `123 ' 123`},
+		{in: `(x -> { init = x ' x }) 123`, eval: `{ init = 123 ' 123 }`},
+		{in: `{ init = #a 123 }`, eval: `{ init = #a 123 }`},
+		{in: `{ init = 123 ' 123 }`, eval: `{ init = 123 ' 123 }`},
+		{in: "{ add1 = n -> n + 1 }", print: "{ add1 = n -> n + 1 }"},
 		{in: "1.0 / 2.0", eval: "0.5"},
 		{in: "1.0 + 2.0", eval: "3.0"},
 		{in: "#abc (1 + 2)", parse: "{32 [{35 abc} 1 2 {43 +} {43  }]}", print: "#abc (1 + 2)", eval: "#abc 3"},

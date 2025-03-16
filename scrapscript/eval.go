@@ -310,7 +310,7 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 		}
 		return nil, fmt.Errorf("expected lists or texts, got %T and %T", left, right)
 	case "'":
-		return snap{nil, "pair", []interface{}{left, right}}, nil
+		return snap{nil, "pair", map[any]any{"l": left, "r": right}}, nil
 	case "|>":
 		val, err := eval(cbor.Tag{Number: TagExpr, Content: []interface{}{right, left, cbor.Tag{Number: TagOp, Content: " "}}}, env)
 		if err != nil {
@@ -425,10 +425,10 @@ func eval(v interface{}, env Env) (interface{}, error) {
 		if err != nil {
 			return nil, err
 		}
-		return snap{nil, x.k, v_}, nil
+		return snap{x.t, x.k, v_}, nil
 
-	case []interface{}:
-		result := make([]interface{}, len(x))
+	case []any:
+		result := make([]any, len(x))
 		for i, item := range x {
 			val, err := eval(item, env)
 			if err != nil {
@@ -438,8 +438,8 @@ func eval(v interface{}, env Env) (interface{}, error) {
 		}
 		return result, nil
 
-	case map[interface{}]interface{}:
-		result := make(map[interface{}]interface{})
+	case map[any]any:
+		result := make(map[any]any)
 		for k, v := range x {
 			val, err := eval(v, env)
 			if err != nil {
@@ -542,6 +542,7 @@ func Eval(flat Flat, env Env) (Flat, error) {
 	if closure, ok := res.(*closure); ok {
 		return cbor.Marshal(closure.fn)
 	}
+	// TODO: This only works at top-level.
 	if s, ok := res.(snap); ok {
 		return cbor.Marshal(cbor.Tag{Number: TagExpr, Content: []interface{}{
 			cbor.Tag{Number: TagTag, Content: s.k},

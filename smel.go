@@ -84,8 +84,16 @@ func init() {
 	}
 }
 
+type FlatUpdate func(scrapscript.Flat) (scrapscript.Flat, string, error) // TODO: -> smel.Cmd msg
+type FlatSub func(scrapscript.Flat) string                               // TODO: -> smel.Sub msg
+type FlatView func(scrapscript.Flat) string                              // TODO: -> smel.View
+
 type model struct {
 	in         string
+	flatModel  scrapscript.Flat
+	flatUpdate FlatUpdate
+	flatSubs   []FlatSub
+	flatView   FlatView
 	out        string
 	err        error
 	showCursor bool
@@ -98,16 +106,24 @@ func initial() model {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tea.EnableMouseCellMotion, tea.Tick(time.Second, func(t time.Time) tea.Msg {
-		return tickMsg(t)
-	}))
+	return tea.Batch(
+		tea.EnableMouseCellMotion,
+		tea.Tick(time.Second/10, func(t time.Time) tea.Msg {
+			return tickMsg(t)
+		}),
+		tea.Tick(time.Second, func(t time.Time) tea.Msg {
+			return blinkMsg(t)
+		}),
+	)
 }
 
 type tickMsg time.Time
+type blinkMsg time.Time
 
 type evalMsg struct {
-	out string
-	err error
+	debug scrapscript.Flat
+	out   string
+	err   error
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -136,10 +152,50 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return evalMsg{err: err}
 				}
 
-				result, err := scrapscript.Print(flat)
+				var v interface{}
+				err = cbor.Unmarshal(flat, &v)
+				if err != nil {
+					return evalMsg{
+						debug: flat,
+						out:   "",
+						err:   err,
+					}
+				}
+				if platform, ok := v.(map[any]any); ok {
+					if init, ok := platform["init"].(cbor.Tag); ok && init.Number == scrapscript.TagExpr {
+						if expr, ok := init.Content.([]any); ok {
+							if tag, ok := expr[0].(cbor.Tag); ok && tag.Number == scrapscript.TagTag && tag.Content == "pair" {
+								if pair, ok := tag.Content.(map[any]any); ok {
+									if init, ok := pair["l"].(scrapscript.Flat); ok {
+										m.flatModel = init
+									}
+									if _, ok := pair["r"].(scrapscript.Flat); ok {
+										// TODO
+									}
+								}
+							}
+						}
+					} else {
+						return evalMsg{
+							debug: flat,
+							err:   fmt.Errorf("invalid init: %v", v),
+						}
+					}
+
+					// m.flatUpdate = platform["update"].(scrapscript.Flat)
+
+					// m.flatSubs = platform["subs"].([]scrapscript.Flat)
+
+					// m.flatView = platform["view"].(scrapscript.Flat)
+
+					return evalMsg{
+						debug: flat,
+						out:   "",
+						err:   nil,
+					}
+				}
 				return evalMsg{
-					out: strings.TrimSpace(result),
-					err: err,
+					err: fmt.Errorf("invalid platform: %v", v),
 				}
 			}
 		case tea.KeyBackspace:
@@ -152,6 +208,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tickMsg:
+		m.flatModel, _, _ = m.flatUpdate(m.flatModel) // TODO: Handle cmd and error.
+		return m, nil
+	case blinkMsg:
 		m.showCursor = !m.showCursor
 		return m, nil
 	case evalMsg:
