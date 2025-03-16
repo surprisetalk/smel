@@ -12,7 +12,7 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
-var env = make(map[string]interface{})
+var env = make(map[string]any)
 
 // TODO: These should go in the scrapyard rather than passed via env.
 func init() {
@@ -42,7 +42,7 @@ func init() {
 			fmt.Fprintln(os.Stderr, "error parsing file", file.Name()+":", err)
 			continue
 		}
-		var v interface{}
+		var v any
 		err = cbor.Unmarshal(flat, &v)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error unmarshalling file", file.Name()+":", err)
@@ -74,7 +74,7 @@ func init() {
 			fmt.Fprintln(os.Stderr, "error evaluating", key+":", err)
 			continue
 		}
-		var v interface{}
+		var v any
 		err = cbor.Unmarshal(result, &v)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "error unmarshalling file", key+":", err)
@@ -121,9 +121,8 @@ type tickMsg time.Time
 type blinkMsg time.Time
 
 type evalMsg struct {
-	debug scrapscript.Flat
-	out   string
-	err   error
+	out string
+	err error
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -152,33 +151,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return evalMsg{err: err}
 				}
 
-				var v interface{}
+				var v any
 				err = cbor.Unmarshal(flat, &v)
 				if err != nil {
 					return evalMsg{
-						debug: flat,
-						out:   "",
-						err:   err,
+						out: "",
+						err: err,
 					}
 				}
 				if platform, ok := v.(map[any]any); ok {
 					if init, ok := platform["init"].(cbor.Tag); ok && init.Number == scrapscript.TagExpr {
 						if expr, ok := init.Content.([]any); ok {
-							if tag, ok := expr[0].(cbor.Tag); ok && tag.Number == scrapscript.TagTag && tag.Content == "pair" {
-								if pair, ok := tag.Content.(map[any]any); ok {
-									if init, ok := pair["l"].(scrapscript.Flat); ok {
-										m.flatModel = init
-									}
-									if _, ok := pair["r"].(scrapscript.Flat); ok {
-										// TODO
-									}
+							if len(expr) == 3 {
+								if op, ok := expr[2].(cbor.Tag); ok && op.Number == scrapscript.TagOp && op.Content == "'" {
+									m.flatModel = expr[0].(scrapscript.Flat)
+									// TODO: cmd: expr[1]
 								}
 							}
 						}
+						return evalMsg{
+							err: fmt.Errorf("invalid init: %v", v),
+						}
 					} else {
 						return evalMsg{
-							debug: flat,
-							err:   fmt.Errorf("invalid init: %v", v),
+							err: fmt.Errorf("invalid init: %v", v),
 						}
 					}
 
@@ -189,9 +185,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// m.flatView = platform["view"].(scrapscript.Flat)
 
 					return evalMsg{
-						debug: flat,
-						out:   "",
-						err:   nil,
+						out: "",
+						err: nil,
 					}
 				}
 				return evalMsg{

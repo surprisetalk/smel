@@ -221,7 +221,7 @@ func TestScrapscript(t *testing.T) {
 			}
 
 			parse, err := scrapscript.Parse(lex)
-			var v interface{}
+			var v any
 			cbor.Unmarshal(parse, &v)
 			parse_ := fmt.Sprintf("%v", v)
 			if checkTest("parse", t, tt.error, err) {

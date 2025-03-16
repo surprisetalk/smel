@@ -34,10 +34,10 @@ const (
 	TokenEtc
 )
 
-// TODO: Change this to interface{}. Use lits when possible, or TagOp / TagSym for everything else.
+// TODO: Change this to any. Use list when possible, or TagOp / TagSym for everything else.
 type Token struct {
 	Type  TokenType
-	Value interface{}
+	Value any
 }
 
 type lexer struct {

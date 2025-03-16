@@ -10,7 +10,7 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
-func print(v interface{}) (string, error) {
+func print(v any) (string, error) {
 	if v == nil {
 		return "()", nil
 	}
@@ -31,7 +31,7 @@ func print(v interface{}) (string, error) {
 		return fmt.Sprintf(`"%v"`, x), nil
 	case snap:
 		return fmt.Sprintf("#%v (%v)", x.k, x.v), nil
-	case []interface{}:
+	case []any:
 		if len(x) == 0 {
 			return "[]", nil
 		}
@@ -44,7 +44,7 @@ func print(v interface{}) (string, error) {
 			xs_ = append(xs_, item_)
 		}
 		return fmt.Sprintf("[ %v ]", strings.Join(xs_, ", ")), nil
-	case map[interface{}]interface{}:
+	case map[any]any:
 		if len(x) == 0 {
 			return "{}", nil
 		}
@@ -82,7 +82,7 @@ func print(v interface{}) (string, error) {
 	case cbor.Tag:
 		switch x.Number {
 		case TagExpr:
-			if xs, ok := x.Content.([]interface{}); ok {
+			if xs, ok := x.Content.([]any); ok {
 				s := []struct {
 					text string
 					prec prec
@@ -177,7 +177,7 @@ func print(v interface{}) (string, error) {
 			}
 			return "", fmt.Errorf("expected list of flats: %v", x.Content)
 		case TagFun:
-			if xs, ok := x.Content.([]interface{}); ok {
+			if xs, ok := x.Content.([]any); ok {
 				if len(xs) == 0 {
 					return "", fmt.Errorf("empty matcher")
 				}
@@ -230,7 +230,7 @@ func print(v interface{}) (string, error) {
 }
 
 func Print(flat Flat) (string, error) {
-	var v interface{}
+	var v any
 	err := cbor.Unmarshal(flat, &v)
 	if err != nil {
 		return "", err

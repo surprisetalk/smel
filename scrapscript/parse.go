@@ -116,7 +116,7 @@ func (p *parser) next() *Token {
 	return token
 }
 
-func tag(t TagN, content interface{}) (Flat, error) {
+func tag(t TagN, content any) (Flat, error) {
 	return em.Marshal(cbor.Tag{Number: t, Content: content})
 }
 

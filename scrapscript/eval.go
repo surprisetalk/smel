@@ -8,7 +8,7 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
-type Env map[string]interface{}
+type Env map[string]any
 
 type closure struct {
 	fn  cbor.Tag
@@ -16,12 +16,12 @@ type closure struct {
 }
 
 type snap struct {
-	t interface{}
+	t any
 	k string
-	v interface{}
+	v any
 }
 
-func numOp(left, right interface{}, intOp func(int64, int64) interface{}, uintOp func(uint64, uint64) interface{}, floatOp func(float64, float64) interface{}) (interface{}, error) {
+func numOp(left, right any, intOp func(int64, int64) any, uintOp func(uint64, uint64) any, floatOp func(float64, float64) any) (any, error) {
 	switch l := left.(type) {
 	case uint64:
 		if r, ok := right.(uint64); ok {
@@ -43,14 +43,14 @@ func numOp(left, right interface{}, intOp func(int64, int64) interface{}, uintOp
 	return nil, fmt.Errorf("invalid numeric operands: left=%v (%T), right=%v (%T)", left, left, right, right)
 }
 
-func asBool(v interface{}) (bool, error) {
+func asBool(v any) (bool, error) {
 	if b, ok := v.(bool); ok {
 		return b, nil
 	}
 	return false, fmt.Errorf("expected boolean, got %T", v)
 }
 
-func match(pattern, value interface{}, env Env) (interface{}, bool, error) {
+func match(pattern, value any, env Env) (any, bool, error) {
 	switch p := pattern.(type) {
 	case int64:
 		if r, ok := value.(int64); ok && p == r {
@@ -71,11 +71,11 @@ func match(pattern, value interface{}, env Env) (interface{}, bool, error) {
 			return value, true, nil
 		case TagExpr:
 			// TODO: Figure out what to do when content >= 3.
-			if content, ok := p.Content.([]interface{}); ok && len(content) == 3 {
+			if content, ok := p.Content.([]any); ok && len(content) == 3 {
 				if opTag, ok := content[2].(cbor.Tag); ok && opTag.Number == TagOp {
 					switch opTag.Content {
 					case ">+":
-						if rightList, ok := value.([]interface{}); ok && len(rightList) > 0 {
+						if rightList, ok := value.([]any); ok && len(rightList) > 0 {
 							firstPattern, restPattern := content[0], content[1]
 							firstElem, restElems := rightList[0], rightList[1:]
 							_, firstMatched, err := match(firstPattern, firstElem, env)
@@ -108,8 +108,8 @@ func match(pattern, value interface{}, env Env) (interface{}, bool, error) {
 				}
 			}
 		}
-	case map[interface{}]interface{}:
-		if r, ok := value.(map[interface{}]interface{}); ok {
+	case map[any]any:
+		if r, ok := value.(map[any]any); ok {
 			allMatched := true
 			for k, patVal := range p {
 				rightVal, exists := r[k]
@@ -130,8 +130,8 @@ func match(pattern, value interface{}, env Env) (interface{}, bool, error) {
 				return value, true, nil
 			}
 		}
-	case []interface{}:
-		if r, ok := value.([]interface{}); ok && len(p) == len(r) {
+	case []any:
+		if r, ok := value.([]any); ok && len(p) == len(r) {
 			allMatched := true
 			for j, patItem := range p {
 				rightItem := r[j]
@@ -152,7 +152,7 @@ func match(pattern, value interface{}, env Env) (interface{}, bool, error) {
 	return nil, false, nil
 }
 
-func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
+func applyOp(op string, left, right any, env Env) (any, error) {
 	switch op {
 	case "?":
 		r, err := asBool(right)
@@ -178,35 +178,35 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 		}
 		return nil, fmt.Errorf("cannot assign %v = %v", left, right)
 	case "@":
-		if rec, ok := left.(map[interface{}]interface{}); ok {
+		if rec, ok := left.(map[any]any); ok {
 			return rec[right.(cbor.Tag).Content.(string)], nil
 		}
 		return nil, fmt.Errorf("cannot access key from non-record: %v", left)
 	case "+", "-", "*", "/", "%", "^":
 		opFuncs := map[string]struct {
-			intFn   func(int64, int64) interface{}
-			uintFn  func(uint64, uint64) interface{}
-			floatFn func(float64, float64) interface{}
+			intFn   func(int64, int64) any
+			uintFn  func(uint64, uint64) any
+			floatFn func(float64, float64) any
 		}{
 			"+": {
-				func(a, b int64) interface{} { return a + b },
-				func(a, b uint64) interface{} { return a + b },
-				func(a, b float64) interface{} { return a + b },
+				func(a, b int64) any { return a + b },
+				func(a, b uint64) any { return a + b },
+				func(a, b float64) any { return a + b },
 			},
 			"-": {
-				func(a, b int64) interface{} { return a - b },
-				func(a, b uint64) interface{} { return int64(a) - int64(b) },
-				func(a, b float64) interface{} { return a - b },
+				func(a, b int64) any { return a - b },
+				func(a, b uint64) any { return int64(a) - int64(b) },
+				func(a, b float64) any { return a - b },
 			},
 			"*": {
-				func(a, b int64) interface{} { return a * b },
-				func(a, b uint64) interface{} { return int64(a) * int64(b) },
-				func(a, b float64) interface{} { return a * b },
+				func(a, b int64) any { return a * b },
+				func(a, b uint64) any { return int64(a) * int64(b) },
+				func(a, b float64) any { return a * b },
 			},
 			"/": {
-				func(a, b int64) interface{} { return fmt.Errorf("division not supported for integers") },
-				func(a, b uint64) interface{} { return fmt.Errorf("division not supported for integers") },
-				func(a, b float64) interface{} {
+				func(a, b int64) any { return fmt.Errorf("division not supported for integers") },
+				func(a, b uint64) any { return fmt.Errorf("division not supported for integers") },
+				func(a, b float64) any {
 					if b == 0 {
 						return fmt.Errorf("division by zero")
 					}
@@ -214,24 +214,24 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 				},
 			},
 			"%": {
-				func(a, b int64) interface{} {
+				func(a, b int64) any {
 					if b == 0 {
 						return fmt.Errorf("modulo by zero")
 					}
 					return a % b
 				},
-				func(a, b uint64) interface{} {
+				func(a, b uint64) any {
 					if b == 0 {
 						return fmt.Errorf("modulo by zero")
 					}
 					return a % b
 				},
-				func(a, b float64) interface{} { return fmt.Errorf("modulo not supported for floats") },
+				func(a, b float64) any { return fmt.Errorf("modulo not supported for floats") },
 			},
 			"^": {
-				func(a, b int64) interface{} { return int64(math.Pow(float64(a), float64(b))) },
-				func(a, b uint64) interface{} { return uint64(math.Pow(float64(a), float64(b))) },
-				func(a, b float64) interface{} { return math.Pow(a, b) },
+				func(a, b int64) any { return int64(math.Pow(float64(a), float64(b))) },
+				func(a, b uint64) any { return uint64(math.Pow(float64(a), float64(b))) },
+				func(a, b float64) any { return math.Pow(a, b) },
 			},
 		}
 
@@ -260,27 +260,27 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 		}
 
 		compFn := func(op string) (
-			func(int64, int64) interface{},
-			func(uint64, uint64) interface{},
-			func(float64, float64) interface{},
+			func(int64, int64) any,
+			func(uint64, uint64) any,
+			func(float64, float64) any,
 		) {
 			switch op {
 			case "<":
-				return func(a, b int64) interface{} { return a < b },
-					func(a, b uint64) interface{} { return a < b },
-					func(a, b float64) interface{} { return a < b }
+				return func(a, b int64) any { return a < b },
+					func(a, b uint64) any { return a < b },
+					func(a, b float64) any { return a < b }
 			case ">":
-				return func(a, b int64) interface{} { return a > b },
-					func(a, b uint64) interface{} { return a > b },
-					func(a, b float64) interface{} { return a > b }
+				return func(a, b int64) any { return a > b },
+					func(a, b uint64) any { return a > b },
+					func(a, b float64) any { return a > b }
 			case "<=":
-				return func(a, b int64) interface{} { return a <= b },
-					func(a, b uint64) interface{} { return a <= b },
-					func(a, b float64) interface{} { return a <= b }
+				return func(a, b int64) any { return a <= b },
+					func(a, b uint64) any { return a <= b },
+					func(a, b float64) any { return a <= b }
 			case ">=":
-				return func(a, b int64) interface{} { return a >= b },
-					func(a, b uint64) interface{} { return a >= b },
-					func(a, b float64) interface{} { return a >= b }
+				return func(a, b int64) any { return a >= b },
+					func(a, b uint64) any { return a >= b },
+					func(a, b float64) any { return a >= b }
 			}
 			return nil, nil, nil
 		}
@@ -288,12 +288,12 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 		intFn, uintFn, floatFn := compFn(op)
 		return numOp(left, right, intFn, uintFn, floatFn)
 	case ">+":
-		if r, ok := right.([]interface{}); ok {
-			return append([]interface{}{left}, r...), nil
+		if r, ok := right.([]any); ok {
+			return append([]any{left}, r...), nil
 		}
 		return nil, fmt.Errorf("expected list, got %T", right)
 	case "+<":
-		if l, ok := left.([]interface{}); ok {
+		if l, ok := left.([]any); ok {
 			return append(l, right), nil
 		}
 		return nil, fmt.Errorf("expected list, got %T", left)
@@ -303,16 +303,16 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 				return l + r, nil
 			}
 		}
-		if l, ok := left.([]interface{}); ok {
-			if r, ok := right.([]interface{}); ok {
+		if l, ok := left.([]any); ok {
+			if r, ok := right.([]any); ok {
 				return append(l, r...), nil
 			}
 		}
 		return nil, fmt.Errorf("expected lists or texts, got %T and %T", left, right)
 	case "'":
-		return snap{nil, "pair", map[any]any{"l": left, "r": right}}, nil
+		return cbor.Tag{Number: TagExpr, Content: []any{left, right, cbor.Tag{Number: TagOp, Content: "'"}}}, nil
 	case "|>":
-		val, err := eval(cbor.Tag{Number: TagExpr, Content: []interface{}{right, left, cbor.Tag{Number: TagOp, Content: " "}}}, env)
+		val, err := eval(cbor.Tag{Number: TagExpr, Content: []any{right, left, cbor.Tag{Number: TagOp, Content: " "}}}, env)
 		if err != nil {
 			return nil, err
 		}
@@ -337,7 +337,7 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 			return applyOp(" ", closure.fn, right, closureEnv)
 		}
 		if fn, ok := left.(cbor.Tag); ok && fn.Number == TagFun {
-			cases := fn.Content.([]interface{})
+			cases := fn.Content.([]any)
 			if len(cases) == 0 {
 				return nil, fmt.Errorf("empty function")
 			}
@@ -373,11 +373,11 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 			if rightFn, ok := right.(*closure); ok {
 				composedFn := cbor.Tag{
 					Number: TagFun,
-					Content: []interface{}{
+					Content: []any{
 						cbor.Tag{Number: TagSym, Content: "x"},
 						cbor.Tag{
 							Number: TagExpr,
-							Content: []interface{}{
+							Content: []any{
 								rightFn,
 								leftFn,
 								cbor.Tag{Number: TagSym, Content: "x"},
@@ -404,7 +404,7 @@ func applyOp(op string, left, right interface{}, env Env) (interface{}, error) {
 	}
 }
 
-func eval(v interface{}, env Env) (interface{}, error) {
+func eval(v any, env Env) (any, error) {
 	if v == nil {
 		return nil, nil
 	}
@@ -464,8 +464,8 @@ func eval(v interface{}, env Env) (interface{}, error) {
 			return nil, fmt.Errorf("invalid variable name: %v", x.Content)
 
 		case TagExpr:
-			if xs, ok := x.Content.([]interface{}); ok {
-				stack := []interface{}{}
+			if xs, ok := x.Content.([]any); ok {
+				stack := []any{}
 
 				for _, x := range xs {
 					if tag, ok := x.(cbor.Tag); ok && tag.Number == TagOp {
@@ -529,8 +529,35 @@ func eval(v interface{}, env Env) (interface{}, error) {
 	}
 }
 
+func clean(v any) any {
+	switch x := v.(type) {
+	case *closure:
+		return x.fn
+	case snap:
+		return cbor.Tag{Number: TagExpr, Content: []any{
+			cbor.Tag{Number: TagTag, Content: x.k},
+			x.v,
+			cbor.Tag{Number: TagOp, Content: " "},
+		}}
+	case []any:
+		for i, item := range x {
+			x[i] = clean(item)
+		}
+		return x
+	case map[any]any:
+		for k, v := range x {
+			x[k] = clean(v)
+		}
+		return x
+	case cbor.Tag:
+		return cbor.Tag{Number: x.Number, Content: clean(x.Content)}
+	default:
+		return x
+	}
+}
+
 func Eval(flat Flat, env Env) (Flat, error) {
-	var v interface{}
+	var v any
 	err := cbor.Unmarshal(flat, &v)
 	if err != nil {
 		return nil, err
@@ -539,16 +566,5 @@ func Eval(flat Flat, env Env) (Flat, error) {
 	if err != nil {
 		return nil, err
 	}
-	if closure, ok := res.(*closure); ok {
-		return cbor.Marshal(closure.fn)
-	}
-	// TODO: This only works at top-level.
-	if s, ok := res.(snap); ok {
-		return cbor.Marshal(cbor.Tag{Number: TagExpr, Content: []interface{}{
-			cbor.Tag{Number: TagTag, Content: s.k},
-			s.v,
-			cbor.Tag{Number: TagOp, Content: " "},
-		}})
-	}
-	return cbor.Marshal(res)
+	return cbor.Marshal(clean(res))
 }
