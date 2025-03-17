@@ -1,9 +1,9 @@
 { init = 
     { type = type::uniform { min = 0, max = 1 }
-    , last = none
+    , last = cmd/none
     }  
     ' cmd/none
-, subs = [ in (#roll ()) ]
+, subs = [ sub/in (#roll ()) ]
 , update = model ->
     -- | #roll _ -> model.type
     --     | { ..., type = #uniform { min, max } } -> model ' (random (n -> n * (max - min) - min) |> task/perform #out)

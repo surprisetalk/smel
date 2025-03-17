@@ -25,11 +25,11 @@ func TestModel_Update(t *testing.T) {
 		},
 		{
 			in:  "every 1000",
-			out: "TODO",
+			out: "",
 		},
 		{
 			in:  "every 1000 |> random |> plot",
-			out: "TODO",
+			out: "",
 		},
 	}
 

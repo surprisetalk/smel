@@ -56,8 +56,10 @@ func init() {
 		// "cmd":      "#none () #out ()",
 		// "cmd/none": "cmd::none ()",
 		// "cmd/out":  "cmd::out",
-		"cmd/none": "_::none ()",
-		"cmd/out":  "_::out",
+		"cmd/none":  "_::none ()",
+		"cmd/out":   "_::out",
+		"sub/every": "_::every",
+		"sub/in":    "_::in",
 	} {
 		tokens, err := scrapscript.Lex(in)
 		if err != nil {
@@ -179,6 +181,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 											if op, ok := expr[2].(cbor.Tag); ok && op.Number == scrapscript.TagOp && op.Content == " " {
 												if tag, ok := expr[0].(cbor.Tag); ok && tag.Number == scrapscript.TagTag {
 													switch tag.Content {
+													case "none":
 													case "out":
 														out, err := cbor.Marshal(expr[1])
 														if err != nil {
