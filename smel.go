@@ -84,13 +84,13 @@ func init() {
 	}
 }
 
-type FlatUpdate func(scrapscript.Flat) (scrapscript.Flat, string, error) // TODO: -> smel.Cmd msg
-type FlatSub func(scrapscript.Flat) string                               // TODO: -> smel.Sub msg
-type FlatView func(scrapscript.Flat) string                              // TODO: -> smel.View
+type FlatUpdate func(any) (scrapscript.Flat, string, error) // TODO: -> smel.Cmd msg
+type FlatSub func(scrapscript.Flat) string                  // TODO: -> smel.Sub msg
+type FlatView func(scrapscript.Flat) string                 // TODO: -> smel.View
 
 type model struct {
 	in         string
-	flatModel  scrapscript.Flat
+	flatModel  any
 	flatUpdate FlatUpdate
 	flatSubs   []FlatSub
 	flatView   FlatView
@@ -121,7 +121,7 @@ type tickMsg time.Time
 type blinkMsg time.Time
 
 type evalMsg struct {
-	out string
+	out string // TODO: This might be []smel.Cmd
 	err error
 }
 
@@ -159,18 +159,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						err: err,
 					}
 				}
+
 				if platform, ok := v.(map[any]any); ok {
 					if init, ok := platform["init"].(cbor.Tag); ok && init.Number == scrapscript.TagExpr {
 						if expr, ok := init.Content.([]any); ok {
 							if len(expr) == 3 {
 								if op, ok := expr[2].(cbor.Tag); ok && op.Number == scrapscript.TagOp && op.Content == "'" {
-									m.flatModel = expr[0].(scrapscript.Flat)
+									m.flatModel = expr[0] // TODO: We have to do this up in the return.
 									// TODO: cmd: expr[1]
+								} else {
+									return evalMsg{
+										err: fmt.Errorf("invalid init: %v", v),
+									}
+								}
+							} else {
+								return evalMsg{
+									err: fmt.Errorf("invalid init: %v", v),
 								}
 							}
-						}
-						return evalMsg{
-							err: fmt.Errorf("invalid init: %v", v),
+						} else {
+							return evalMsg{
+								err: fmt.Errorf("invalid init: %v", v),
+							}
 						}
 					} else {
 						return evalMsg{
@@ -184,6 +194,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 					// m.flatView = platform["view"].(scrapscript.Flat)
 
+					// TODO: Return the cmds output.
 					return evalMsg{
 						out: "",
 						err: nil,
