@@ -38,12 +38,12 @@ func TestModel_Update(t *testing.T) {
 			m := model{
 				in: tt.in,
 			}
-			_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-			msg := cmd().(evalMsg)
-			if msg.err != nil {
-				t.Errorf("error: %v", msg.err)
-			} else if msg.out != tt.out {
-				t.Errorf("expected out %s, got %s", tt.out, msg.out)
+			m_, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+			m = m_.(model)
+			if m.err != nil {
+				t.Errorf("error: %v", m.err)
+			} else if m.out != tt.out {
+				t.Errorf("expected out %s, got %s", tt.out, m.out)
 			}
 		})
 	}

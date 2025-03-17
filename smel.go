@@ -84,16 +84,20 @@ func init() {
 	}
 }
 
-type FlatUpdate func(any) (scrapscript.Flat, string, error) // TODO: -> smel.Cmd msg
-type FlatSub func(scrapscript.Flat) string                  // TODO: -> smel.Sub msg
-type FlatView func(scrapscript.Flat) string                 // TODO: -> smel.View
+type smelUpdate func(any) (scrapscript.Flat, string, error) // TODO: -> smel.Cmd msg
+type smelSub func(scrapscript.Flat) string                  // TODO: -> smel.Sub msg
+type smelView func(scrapscript.Flat) string                 // TODO: -> smel.View
+
+type platform struct {
+	model  any
+	update smelUpdate
+	subs   []smelSub
+	view   smelView
+}
 
 type model struct {
 	in         string
-	flatModel  any
-	flatUpdate FlatUpdate
-	flatSubs   []FlatSub
-	flatView   FlatView
+	platform   platform
 	out        string
 	err        error
 	showCursor bool
@@ -120,11 +124,6 @@ func (m model) Init() tea.Cmd {
 type tickMsg time.Time
 type blinkMsg time.Time
 
-type evalMsg struct {
-	out string // TODO: This might be []smel.Cmd
-	err error
-}
-
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -135,75 +134,115 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.in == "" {
 				return m, nil
 			}
-			return m, func() tea.Msg {
-				tokens, err := scrapscript.Lex(m.in)
-				if err != nil {
-					return evalMsg{err: err}
-				}
 
-				flat, err := scrapscript.Parse(tokens)
-				if err != nil {
-					return evalMsg{err: err}
-				}
+			tokens, err := scrapscript.Lex(m.in)
+			if err != nil {
+				m.err = err
+				return m, nil
+			}
 
-				flat, err = scrapscript.Eval(flat, env)
-				if err != nil {
-					return evalMsg{err: err}
-				}
+			flat, err := scrapscript.Parse(tokens)
+			if err != nil {
+				m.err = err
+				return m, nil
+			}
 
-				var v any
-				err = cbor.Unmarshal(flat, &v)
-				if err != nil {
-					return evalMsg{
-						out: "",
-						err: err,
-					}
-				}
+			flat, err = scrapscript.Eval(flat, env)
+			if err != nil {
+				m.err = err
+				return m, nil
+			}
 
-				if platform, ok := v.(map[any]any); ok {
-					if init, ok := platform["init"].(cbor.Tag); ok && init.Number == scrapscript.TagExpr {
-						if expr, ok := init.Content.([]any); ok {
-							if len(expr) == 3 {
-								if op, ok := expr[2].(cbor.Tag); ok && op.Number == scrapscript.TagOp && op.Content == "'" {
-									m.flatModel = expr[0] // TODO: We have to do this up in the return.
-									// TODO: cmd: expr[1]
-								} else {
-									return evalMsg{
-										err: fmt.Errorf("invalid init: %v", v),
+			var v any
+			err = cbor.Unmarshal(flat, &v)
+			if err != nil {
+				m.err = err
+				return m, nil
+			}
+
+			p := platform{}
+			cmds := []tea.Cmd{}
+
+			// TODO: Need to Marshal flatscraps into golang to avoid this nonsense.
+			if platform, ok := v.(map[any]any); ok {
+				if init, ok := platform["init"].(cbor.Tag); ok && init.Number == scrapscript.TagExpr {
+					if expr, ok := init.Content.([]any); ok {
+						if len(expr) == 3 {
+							if op, ok := expr[2].(cbor.Tag); ok && op.Number == scrapscript.TagOp && op.Content == "'" {
+
+								p.model = expr[0]
+
+								// TODO: if cmd/http, append to cmds.
+								if cmd, ok := expr[1].(cbor.Tag); ok && cmd.Number == scrapscript.TagExpr {
+									if expr, ok := cmd.Content.([]any); ok {
+										if len(expr) == 3 {
+											if op, ok := expr[2].(cbor.Tag); ok && op.Number == scrapscript.TagOp && op.Content == " " {
+												if tag, ok := expr[0].(cbor.Tag); ok && tag.Number == scrapscript.TagTag {
+													switch tag.Content {
+													case "out":
+														out, err := cbor.Marshal(expr[1])
+														if err != nil {
+															m.err = err
+															return m, nil
+														}
+														m.out, err = scrapscript.Print(out)
+														if err != nil {
+															m.err = err
+															return m, nil
+														}
+													case "err":
+														m.err = fmt.Errorf("%v", expr[1])
+													default:
+														m.err = fmt.Errorf("invalid cmd: %v", tag.Content)
+														return m, nil
+													}
+												} else {
+													m.err = fmt.Errorf("invalid cmd: %v", cmd)
+													return m, nil
+												}
+											} else {
+												m.err = fmt.Errorf("invalid cmd: %v", cmd)
+												return m, nil
+											}
+										} else {
+											m.err = fmt.Errorf("invalid cmd: %v", cmd)
+											return m, nil
+										}
+									} else {
+										m.err = fmt.Errorf("invalid cmd: %v", cmd)
+										return m, nil
 									}
 								}
+
 							} else {
-								return evalMsg{
-									err: fmt.Errorf("invalid init: %v", v),
-								}
+								m.err = fmt.Errorf("invalid init: %v", v)
+								return m, nil
 							}
 						} else {
-							return evalMsg{
-								err: fmt.Errorf("invalid init: %v", v),
-							}
+							m.err = fmt.Errorf("invalid init: %v", v)
+							return m, nil
 						}
 					} else {
-						return evalMsg{
-							err: fmt.Errorf("invalid init: %v", v),
-						}
+						m.err = fmt.Errorf("invalid init: %v", v)
+						return m, nil
 					}
-
-					// m.flatUpdate = platform["update"].(scrapscript.Flat)
-
-					// m.flatSubs = platform["subs"].([]scrapscript.Flat)
-
-					// m.flatView = platform["view"].(scrapscript.Flat)
-
-					// TODO: Return the cmds output.
-					return evalMsg{
-						out: "",
-						err: nil,
-					}
+				} else {
+					m.err = fmt.Errorf("invalid init: %v", v)
+					return m, nil
 				}
-				return evalMsg{
-					err: fmt.Errorf("invalid platform: %v", v),
-				}
+
+				// p.update = platform["update"].(scrapscript.Flat)
+
+				// p.subs = platform["subs"].([]scrapscript.Flat)
+
+				// p.view = platform["view"].(scrapscript.Flat)
+
+				m.platform = p
+
+				return m, tea.Batch(cmds...)
 			}
+			m.err = fmt.Errorf("invalid platform: %v", v)
+			return m, nil
 		case tea.KeyBackspace:
 			if len(m.in) > 0 {
 				m.in = m.in[:len(m.in)-1]
@@ -214,15 +253,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tickMsg:
-		m.flatModel, _, _ = m.flatUpdate(m.flatModel) // TODO: Handle cmd and error.
+		m.platform.update(m.platform.model) // TODO: Handle cmd and error.
 		return m, nil
 	case blinkMsg:
 		m.showCursor = !m.showCursor
-		return m, nil
-	case evalMsg:
-		m.out = msg.out
-		m.err = msg.err
-		m.in = ""
 		return m, nil
 	}
 	return m, nil
