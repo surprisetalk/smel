@@ -165,8 +165,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			p := platform{}
 			cmds := []tea.Cmd{}
 
+			var platform map[any]any
+			var ok bool
+
 			// TODO: Need to Marshal flatscraps into golang to avoid this nonsense.
-			if platform, ok := v.(map[any]any); ok {
+			if platform, ok = v.(map[any]any); !ok {
+				m.err = fmt.Errorf("invalid platform: %v", v)
+				return m, nil
+			}
 				if init, ok := platform["init"].(cbor.Tag); ok && init.Number == scrapscript.TagExpr {
 					if expr, ok := init.Content.([]any); ok {
 						if len(expr) == 3 {
@@ -243,9 +249,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.platform = p
 
 				return m, tea.Batch(cmds...)
-			}
-			m.err = fmt.Errorf("invalid platform: %v", v)
-			return m, nil
 		case tea.KeyBackspace:
 			if len(m.in) > 0 {
 				m.in = m.in[:len(m.in)-1]
