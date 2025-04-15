@@ -187,7 +187,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.err = fmt.Errorf("invalid init: %v", v)
 						return m, nil
 					}
-						if len(expr) == 3 {
+
+						if len(expr) != 3 {
+							m.err = fmt.Errorf("invalid init: %v", v)
+							return m, nil
+						}
+
 							if op, ok := expr[2].(cbor.Tag); ok && op.Number == scrapscript.TagOp && op.Content == "'" {
 
 								p.model = expr[0]
@@ -239,10 +244,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								m.err = fmt.Errorf("invalid init: %v", v)
 								return m, nil
 							}
-						} else {
-							m.err = fmt.Errorf("invalid init: %v", v)
-							return m, nil
-						}
 
 				// p.update = platform["update"].(scrapscript.Flat)
 
