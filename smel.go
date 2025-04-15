@@ -219,7 +219,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 											return m, nil
 										}
 
-											if op, ok := expr[2].(cbor.Tag); ok && op.Number == scrapscript.TagOp && op.Content == " " {
+											if op, ok = expr[2].(cbor.Tag); !ok || op.Number != scrapscript.TagOp || op.Content != " " {
+												m.err = fmt.Errorf("invalid cmd: %v", cmd)
+												return m, nil
+											}
+
 												if tag, ok := expr[0].(cbor.Tag); ok && tag.Number == scrapscript.TagTag {
 													switch tag.Content {
 													case "none":
@@ -244,10 +248,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 													m.err = fmt.Errorf("invalid cmd: %v", cmd)
 													return m, nil
 												}
-											} else {
-												m.err = fmt.Errorf("invalid cmd: %v", cmd)
-												return m, nil
-											}
 
 				// p.update = platform["update"].(scrapscript.Flat)
 
