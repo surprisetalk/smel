@@ -270,8 +270,7 @@ func (m model) View() string {
 	if !m.showCursor {
 		cursor = " "
 	}
-	s := ""
-	s += fmt.Sprintf("> %s%s\n\n", m.in, cursor)
+	s := fmt.Sprintf("> %s%s\n\n", m.in, cursor)
 	if m.err != nil {
 		s += fmt.Sprintf("Error: %v\n", m.err)
 	} else if m.out != "" {
