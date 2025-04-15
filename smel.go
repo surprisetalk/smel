@@ -256,7 +256,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tickMsg:
-		m.platform.update(m.platform.model) // TODO: Handle cmd and error.
+		// TODO: Handle cmd and error.
+		// m.platform.update(m.platform.model)
 		return m, nil
 	case blinkMsg:
 		m.showCursor = !m.showCursor
