@@ -174,92 +174,92 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
-				var init cbor.Tag
+			var init cbor.Tag
 
-				if init, ok = platform["init"].(cbor.Tag); !ok || init.Number != scrapscript.TagExpr {
-					m.err = fmt.Errorf("invalid init: %v", v)
+			if init, ok = platform["init"].(cbor.Tag); !ok || init.Number != scrapscript.TagExpr {
+				m.err = fmt.Errorf("invalid init: %v", v)
+				return m, nil
+			}
+
+			var expr []any
+
+			if expr, ok = init.Content.([]any); !ok {
+				m.err = fmt.Errorf("invalid init: %v", v)
+				return m, nil
+			}
+
+			if len(expr) != 3 {
+				m.err = fmt.Errorf("invalid init: %v", v)
+				return m, nil
+			}
+
+			var op cbor.Tag
+
+			if op, ok = expr[2].(cbor.Tag); !ok || op.Number != scrapscript.TagOp || op.Content != "'" {
+				m.err = fmt.Errorf("invalid init: %v", v)
+				return m, nil
+			}
+
+			p.model = expr[0]
+
+			var cmd cbor.Tag
+
+			// TODO: if cmd/http, append to cmds.
+			if cmd, ok = expr[1].(cbor.Tag); !ok || cmd.Number != scrapscript.TagExpr {
+				// TODO: what to do in case of error?
+			}
+
+			if expr, ok = cmd.Content.([]any); !ok {
+				m.err = fmt.Errorf("invalid cmd: %v", cmd)
+				return m, nil
+			}
+
+			if len(expr) != 3 {
+				m.err = fmt.Errorf("invalid cmd: %v", cmd)
+				return m, nil
+			}
+
+			if op, ok = expr[2].(cbor.Tag); !ok || op.Number != scrapscript.TagOp || op.Content != " " {
+				m.err = fmt.Errorf("invalid cmd: %v", cmd)
+				return m, nil
+			}
+
+			var tag cbor.Tag
+
+			if tag, ok = expr[0].(cbor.Tag); !ok || tag.Number != scrapscript.TagTag {
+				m.err = fmt.Errorf("invalid cmd: %v", cmd)
+				return m, nil
+			}
+
+			switch tag.Content {
+			case "none":
+			case "out":
+				out, err := cbor.Marshal(expr[1])
+				if err != nil {
+					m.err = err
 					return m, nil
 				}
+				m.out, err = scrapscript.Print(out)
+				if err != nil {
+					m.err = err
+					return m, nil
+				}
+			case "err":
+				m.err = fmt.Errorf("%v", expr[1])
+			default:
+				m.err = fmt.Errorf("invalid cmd: %v", tag.Content)
+				return m, nil
+			}
 
-					var expr []any
+			// p.update = platform["update"].(scrapscript.Flat)
 
-					if expr, ok = init.Content.([]any); !ok {
-						m.err = fmt.Errorf("invalid init: %v", v)
-						return m, nil
-					}
+			// p.subs = platform["subs"].([]scrapscript.Flat)
 
-						if len(expr) != 3 {
-							m.err = fmt.Errorf("invalid init: %v", v)
-							return m, nil
-						}
+			// p.view = platform["view"].(scrapscript.Flat)
 
-							var op cbor.Tag
+			m.platform = p
 
-							if op, ok = expr[2].(cbor.Tag); !ok || op.Number != scrapscript.TagOp || op.Content != "'" {
-								m.err = fmt.Errorf("invalid init: %v", v)
-								return m, nil
-							}
-
-								p.model = expr[0]
-
-								var cmd cbor.Tag
-
-								// TODO: if cmd/http, append to cmds.
-								if cmd, ok = expr[1].(cbor.Tag); !ok || cmd.Number != scrapscript.TagExpr {
-									// TODO: what to do in case of error?
-								}
-
-									if expr, ok = cmd.Content.([]any); !ok {
-										m.err = fmt.Errorf("invalid cmd: %v", cmd)
-										return m, nil
-									}
-
-										if len(expr) != 3 {
-											m.err = fmt.Errorf("invalid cmd: %v", cmd)
-											return m, nil
-										}
-
-											if op, ok = expr[2].(cbor.Tag); !ok || op.Number != scrapscript.TagOp || op.Content != " " {
-												m.err = fmt.Errorf("invalid cmd: %v", cmd)
-												return m, nil
-											}
-
-												var tag cbor.Tag
-
-												if tag, ok = expr[0].(cbor.Tag); !ok || tag.Number != scrapscript.TagTag {
-													m.err = fmt.Errorf("invalid cmd: %v", cmd)
-													return m, nil
-												}
-
-													switch tag.Content {
-													case "none":
-													case "out":
-														out, err := cbor.Marshal(expr[1])
-														if err != nil {
-															m.err = err
-															return m, nil
-														}
-														m.out, err = scrapscript.Print(out)
-														if err != nil {
-															m.err = err
-															return m, nil
-														}
-													case "err":
-														m.err = fmt.Errorf("%v", expr[1])
-													default:
-														m.err = fmt.Errorf("invalid cmd: %v", tag.Content)
-														return m, nil
-													}
-
-				// p.update = platform["update"].(scrapscript.Flat)
-
-				// p.subs = platform["subs"].([]scrapscript.Flat)
-
-				// p.view = platform["view"].(scrapscript.Flat)
-
-				m.platform = p
-
-				return m, tea.Batch(cmds...)
+			return m, tea.Batch(cmds...)
 		case tea.KeyBackspace:
 			if len(m.in) > 0 {
 				m.in = m.in[:len(m.in)-1]
