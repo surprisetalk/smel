@@ -202,8 +202,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 								p.model = expr[0]
 
+								var cmd cbor.Tag
+
 								// TODO: if cmd/http, append to cmds.
-								if cmd, ok := expr[1].(cbor.Tag); ok && cmd.Number == scrapscript.TagExpr {
+								if cmd, ok = expr[1].(cbor.Tag); !ok || cmd.Number != scrapscript.TagExpr {
+									// TODO: what to do in case of error?
+								}
 									if expr, ok := cmd.Content.([]any); ok {
 										if len(expr) == 3 {
 											if op, ok := expr[2].(cbor.Tag); ok && op.Number == scrapscript.TagOp && op.Content == " " {
@@ -243,7 +247,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 										m.err = fmt.Errorf("invalid cmd: %v", cmd)
 										return m, nil
 									}
-								}
 
 				// p.update = platform["update"].(scrapscript.Flat)
 
